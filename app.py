@@ -10,6 +10,13 @@ st.title("🎯 منظومة تتبع سيولة وتدفق الأوبشن (Order
 # القائمة الجانبية
 st.sidebar.header("⚙️ إعدادات التحليل")
 ticker_symbol = st.sidebar.text_input("رمز السهم", value="NVDA").upper()
+
+# اختيار نوع العقود المعروضة
+option_type_filter = st.sidebar.radio(
+    "عرض العقود:",
+    options=["الكل (Calls & Puts)", "عقود الكول فقط (Calls)", "عقود البوت فقط (Puts)"]
+)
+
 num_strikes = st.sidebar.select_slider("عدد السترايكات", options=[20, 30, 50, "ALL"], value=30)
 
 if ticker_symbol:
@@ -23,8 +30,8 @@ if ticker_symbol:
 
             opt = stock.option_chain(selected_exp)
 
-            calls = opt.calls[['strike', 'lastPrice', 'bid', 'ask', 'openInterest', 'volume']].copy()
-            puts = opt.puts[['strike', 'lastPrice', 'bid', 'ask', 'openInterest', 'volume']].copy()
+            calls = opt.calls[['strike', 'bid', 'ask', 'openInterest', 'volume', 'lastPrice']].copy()
+            puts = opt.puts[['strike', 'bid', 'ask', 'openInterest', 'volume', 'lastPrice']].copy()
 
             df = pd.merge(calls, puts, on='strike', suffixes=('_Call', '_Put'), how='outer').sort_values('strike').fillna(0)
 
@@ -60,18 +67,33 @@ if ticker_symbol:
 
             df['STRIKE_FORMATTED'] = df['strike'].apply(lambda x: f"{int(x)}" if x.is_integer() else f"{x:g}")
 
-            # الجدول التفاعلي القديم المباشر
-            df_display = pd.DataFrame({
-                'Call Flow': df['Call_Flow'],
-                'OI Call': df['openInterest_Call'].astype(int),
-                'Vol Call': df['volume_Call'].astype(int),
-                'Last Call': df['lastPrice_Call'],
-                'STRIKE (السترايك)': df['STRIKE_FORMATTED'],
-                'Last Put': df['lastPrice_Put'],
-                'Vol Put': df['volume_Put'].astype(int),
-                'OI Put': df['openInterest_Put'].astype(int),
-                'Put Flow': df['Put_Flow']
-            })
+            # بناء الجدول حسب تحديد المستخدم لنوع العقود
+            if option_type_filter == "عقود الكول فقط (Calls)":
+                df_display = pd.DataFrame({
+                    'STRIKE (السترايك)': df['STRIKE_FORMATTED'],
+                    'OI Call': df['openInterest_Call'].astype(int),
+                    'Vol Call': df['volume_Call'].astype(int),
+                    'Call Flow (الحالة)': df['Call_Flow']
+                })
+
+            elif option_type_filter == "عقود البوت فقط (Puts)":
+                df_display = pd.DataFrame({
+                    'STRIKE (السترايك)': df['STRIKE_FORMATTED'],
+                    'OI Put': df['openInterest_Put'].astype(int),
+                    'Vol Put': df['volume_Put'].astype(int),
+                    'Put Flow (الحالة)': df['Put_Flow']
+                })
+
+            else:  # الكل
+                df_display = pd.DataFrame({
+                    'STRIKE (السترايك)': df['STRIKE_FORMATTED'],
+                    'OI Call': df['openInterest_Call'].astype(int),
+                    'Vol Call': df['volume_Call'].astype(int),
+                    'Call Flow': df['Call_Flow'],
+                    'OI Put': df['openInterest_Put'].astype(int),
+                    'Vol Put': df['volume_Put'].astype(int),
+                    'Put Flow': df['Put_Flow']
+                })
 
             st.dataframe(
                 df_display,
