@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime
 
 # إعدادات الصفحة
-st.set_page_config(page_title="جدول عقود الخيارات - الدفتر", layout="wide")
+st.set_page_config(page_title="جدول الخيارات - الدفتر", layout="wide")
 
 st.title("📊 جدول عقود الخيارات (Call & Put)")
 
@@ -23,13 +23,13 @@ if ticker_symbol:
         
         col_price, col_time = st.columns([1, 2])
         with col_price:
-            st.metric(label=f"سعر {ticker_symbol} الحالي", value=f"${price:.2f}")
+            st.metric(label=f"سعر {ticker_symbol} الحالي", value=f"${price:g}")
         with col_time:
-            st.caption("ℹ️ تنبيه: يتم تحديث الـ Open Interest مرة واحدة يومياً قبل الافتتاح بناءً على تسوية اليوم السابق.")
+            st.caption("ℹ️ التحديث الرسمي للـ Open Interest يتم تسويته صباح كل يوم قبل افتتاح السوق.")
 
         expirations = stock.options
         if expirations:
-            # أيام الأسبوع بالعربي
+            # أسماء أيام الأسبوع بالعربي
             days_ar = {
                 "Monday": "الاثنين", "Tuesday": "الثلاثاء", "Wednesday": "الأربعاء", 
                 "Thursday": "الخميس", "Friday": "الجمعة", "Saturday": "السبت", "Sunday": "الأحد"
@@ -68,24 +68,42 @@ if ticker_symbol:
                 # دمج الكول والبوت حسب السترايك
                 df = pd.merge(calls, puts, on='strike', suffixes=('_Call', '_Put'), how='outer').sort_values('strike').fillna(0)
 
+                # دالة تقدير الاتجاه (Short / Long) بناءً على تنفيذ السعر بين الـ Bid والـ Ask
+                def get_sentiment(last, bid, ask):
+                    if ask > bid and last >= ask:
+                        return "🟢 Long (تجميع/شراء)"
+                    elif ask > bid and last <= bid:
+                        return "🔴 Short (تفريغ/بيع)"
+                    return "⚪ محايد"
+
+                df['Call_Sentiment'] = df.apply(lambda r: get_sentiment(r['lastPrice_Call'], r['bid_Call'], r['ask_Call']), axis=1)
+                df['Put_Sentiment'] = df.apply(lambda r: get_sentiment(r['lastPrice_Put'], r['bid_Put'], r['ask_Put']), axis=1)
+
+                # إشارة بناء مراكز جديدة ضخمة/عقود مركبة (Volume > OI)
+                df['Call_Fresh'] = df.apply(lambda r: "⚡ دخول جديد" if r['volume_Call'] > r['openInterest_Call'] and r['volume_Call'] > 100 else "-", axis=1)
+                df['Put_Fresh'] = df.apply(lambda r: "⚡ دخول جديد" if r['volume_Put'] > r['openInterest_Put'] and r['volume_Put'] > 100 else "-", axis=1)
+
                 # فلترة عدد السترايكات القريبة من سعر السهم
                 if num_strikes != "ALL":
                     df['price_diff'] = (df['strike'] - price).abs()
                     df = df.nsmallest(num_strikes, 'price_diff').sort_values('strike')
                     df = df.drop(columns=['price_diff'])
 
-                # ترتيب الأعمدة على شكل دفتر (الكول يسار، السترايك وسط، البوت يمين)
+                # تنسيق السترايك لإلغاء الأصفار العشرية غير الضرورية (مثل 230 بدلاً من 230.0)
+                df['STRIKE_FORMATTED'] = df['strike'].apply(lambda x: f"{int(x)}" if x.is_integer() else f"{x:g}")
+
+                # ترتيب جدول الدفتر المنسق والأنيق
                 df_display = pd.DataFrame({
+                    'نشاط Call': df['Call_Fresh'],
+                    'اتجاه Call': df['Call_Sentiment'],
                     'OI (Call)': df['openInterest_Call'].astype(int),
-                    'Vol (Call)': df['volume_Call'].astype(int),
-                    'سعر (Call)': df['lastPrice_Call'],
-                    'STRIKE': df['strike'],
-                    'سعر (Put)': df['lastPrice_Put'],
-                    'Vol (Put)': df['volume_Put'].astype(int),
-                    'OI (Put)': df['openInterest_Put'].astype(int)
+                    'STRIKE (السترايك)': df['STRIKE_FORMATTED'],
+                    'OI (Put)': df['openInterest_Put'].astype(int),
+                    'اتجاه Put': df['Put_Sentiment'],
+                    'نشاط Put': df['Put_Fresh']
                 })
 
-                # عرض الجدول بشكل احترافي
+                # عرض الجدول
                 st.dataframe(
                     df_display.style.highlight_max(subset=['OI (Call)', 'OI (Put)'], color='#1f3a2b'), 
                     use_container_width=True, 
