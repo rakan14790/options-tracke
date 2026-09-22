@@ -2,9 +2,10 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from scipy.stats import norm
+import math
 from datetime import datetime
 
+# إعدادات الصفحة
 st.set_page_config(page_title="محلل صانع السوق - Net Gamma & Order Flow", layout="wide")
 
 st.title("🎯 منظومة صانع السوق (Net Gamma, Delta, Order Flow & OI)")
@@ -14,16 +15,26 @@ st.sidebar.header("⚙️ إعدادات التحليل")
 ticker_symbol = st.sidebar.text_input("رمز السهم", value="NVDA").upper()
 num_strikes = st.sidebar.select_slider("عدد السترايكات", options=[20, 30, 50, "ALL"], value=30)
 
+# معادلات Black-Scholes المدمجة بدون حزم خارجية
+def norm_cdf(x):
+    return (1.0 + math.erf(x / math.sqrt(2.0))) / 2.0
+
+def norm_pdf(x):
+    return math.exp(-0.5 * x**2) / math.sqrt(2.0 * math.pi)
+
 def calculate_greeks(S, K, T, r, sigma, option_type='call'):
-    if T <= 0 or sigma <= 0:
+    if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
         return 0.0, 0.0
-    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
-    gamma = norm.pdf(d1) / (S * sigma * np.sqrt(T))
-    if option_type == 'call':
-        delta = norm.cdf(d1)
-    else:
-        delta = norm.cdf(d1) - 1.0
-    return round(delta, 2), round(gamma, 4)
+    try:
+        d1 = (math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
+        gamma = norm_pdf(d1) / (S * sigma * math.sqrt(T))
+        if option_type == 'call':
+            delta = norm_cdf(d1)
+        else:
+            delta = norm_cdf(d1) - 1.0
+        return round(delta, 2), round(gamma, 4)
+    except:
+        return 0.0, 0.0
 
 if ticker_symbol:
     try:
@@ -73,18 +84,18 @@ if ticker_symbol:
                     flow_type = "🔥 Spike "
                 
                 if ask > bid and last >= ask:
-                    return flow_type + "🟢 Long (تجميع Ask)"
+                    return flow_type + "🟢 Long"
                 elif ask > bid and last <= bid:
-                    return flow_type + "🔴 Short (تفريغ Bid)"
+                    return flow_type + "🔴 Short"
                 return flow_type + "🟡 محايد"
 
             df['Call_Flow'] = df.apply(lambda r: analyze_flow(r['lastPrice_Call'], r['bid_Call'], r['ask_Call'], r['volume_Call'], r['openInterest_Call']), axis=1)
             df['Put_Flow'] = df.apply(lambda r: analyze_flow(r['lastPrice_Put'], r['bid_Put'], r['ask_Put'], r['volume_Put'], r['openInterest_Put']), axis=1)
 
-            # ملخص بيئة الجاما الإجمالية للأسهم
+            # ملخص بيئة الجاما الإجمالية
             total_net_gamma = df['Net_Gamma'].sum()
-            call_wall_strike = df.loc[df['Call_Gamma'].idxmax()]['strike']
-            put_wall_strike = df.loc[df['Put_Gamma'].idxmax()]['strike']
+            call_wall_strike = df.loc[df['Call_Gamma'].idxmax()]['strike'] if not df.empty else 0
+            put_wall_strike = df.loc[df['Put_Gamma'].idxmax()]['strike'] if not df.empty else 0
 
             col1, col2, col3, col4 = st.columns(4)
             col1.metric("السعر الحالي", f"${price:g}")
@@ -99,7 +110,7 @@ if ticker_symbol:
 
             df['STRIKE_FORMATTED'] = df['strike'].apply(lambda x: f"{int(x)}" if x.is_integer() else f"{x:g}")
 
-            # جدول العرض النهائي الموحد
+            # جدول العرض النهائي
             df_display = pd.DataFrame({
                 'Call Flow': df['Call_Flow'],
                 'OI Call': df['openInterest_Call'].astype(int),
@@ -121,4 +132,4 @@ if ticker_symbol:
             )
 
     except Exception as e:
-        st.error(f"حدث خطأ: {e}")
+        st.error(f"حدث خطأ أثناء معالجة البيانات: {e}")
