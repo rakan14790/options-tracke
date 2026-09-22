@@ -125,8 +125,9 @@ if ticker_symbol:
                 'Put Flow': df['Put_Flow']
             })
 
+            # عرض الجدول بدون تلوين معقد متسبب بالخطأ
             st.dataframe(
-                df_display.style.background_gradient(subset=['Net Gamma الصافية'], cmap='RdYlGn'),
+                df_display,
                 use_container_width=True,
                 height=700
             )
