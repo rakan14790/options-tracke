@@ -1,118 +1,124 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import numpy as np
+from scipy.stats import norm
 from datetime import datetime
 
-# إعدادات الصفحة
-st.set_page_config(page_title="جدول الخيارات - الدفتر", layout="wide")
+st.set_page_config(page_title="محلل صانع السوق - Net Gamma & Order Flow", layout="wide")
 
-st.title("📊 جدول عقود الخيارات (Call & Put)")
+st.title("🎯 منظومة صانع السوق (Net Gamma, Delta, Order Flow & OI)")
 
-# القائمة الجانبية للإعدادات
-st.sidebar.header("⚙️ إعدادات البحث والفلترة")
+# القائمة الجانبية
+st.sidebar.header("⚙️ إعدادات التحليل")
 ticker_symbol = st.sidebar.text_input("رمز السهم", value="NVDA").upper()
-num_strikes = st.sidebar.select_slider("عدد السترايكات (حول السعر الحالي)", options=[20, 30, 50, "ALL"], value=30)
+num_strikes = st.sidebar.select_slider("عدد السترايكات", options=[20, 30, 50, "ALL"], value=30)
 
-# اختيار نوع التصفية للتاريخ
-view_type = st.sidebar.radio("نوع التصفية للتاريخ", ["الكل", "أسبوعي / يومي (الاثنين، الأربعاء، الجمعة)", "شهري (الجمعة الثالثة)"])
+def calculate_greeks(S, K, T, r, sigma, option_type='call'):
+    if T <= 0 or sigma <= 0:
+        return 0.0, 0.0
+    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+    gamma = norm.pdf(d1) / (S * sigma * np.sqrt(T))
+    if option_type == 'call':
+        delta = norm.cdf(d1)
+    else:
+        delta = norm.cdf(d1) - 1.0
+    return round(delta, 2), round(gamma, 4)
 
 if ticker_symbol:
     try:
         stock = yf.Ticker(ticker_symbol)
         price = stock.fast_info['lastPrice']
         
-        col_price, col_time = st.columns([1, 2])
-        with col_price:
-            st.metric(label=f"سعر {ticker_symbol} الحالي", value=f"${price:g}")
-        with col_time:
-            st.caption("ℹ️ التحديث الرسمي للـ Open Interest يتم تسويته صباح كل يوم قبل افتتاح السوق.")
-
         expirations = stock.options
         if expirations:
-            # أسماء أيام الأسبوع بالعربي
-            days_ar = {
-                "Monday": "الاثنين", "Tuesday": "الثلاثاء", "Wednesday": "الأربعاء", 
-                "Thursday": "الخميس", "Friday": "الجمعة", "Saturday": "السبت", "Sunday": "الأحد"
-            }
-            
-            exp_options = []
-            for exp in expirations:
-                dt = datetime.strptime(exp, "%Y-%m-%d")
-                day_name = days_ar.get(dt.strftime("%A"), dt.strftime("%A"))
+            selected_exp = st.selectbox("اختر تاريخ الانتهاء", options=expirations)
+
+            opt = stock.option_chain(selected_exp)
+            dt_exp = datetime.strptime(selected_exp, "%Y-%m-%d")
+            T = max((dt_exp - datetime.now()).days, 1) / 365.0
+            r = 0.045
+
+            calls = opt.calls[['strike', 'lastPrice', 'bid', 'ask', 'openInterest', 'volume', 'impliedVolatility']].copy()
+            puts = opt.puts[['strike', 'lastPrice', 'bid', 'ask', 'openInterest', 'volume', 'impliedVolatility']].copy()
+
+            df = pd.merge(calls, puts, on='strike', suffixes=('_Call', '_Put'), how='outer').sort_values('strike').fillna(0)
+
+            call_deltas, call_gammas, put_deltas, put_gammas = [], [], [], []
+
+            for _, row in df.iterrows():
+                d_c, g_c = calculate_greeks(price, row['strike'], T, r, row['impliedVolatility_Call'], 'call')
+                call_deltas.append(d_c)
+                call_gammas.append(g_c)
                 
-                # تصنيف العقود الشهرية (الجمعة الثالثة من الشهر)
-                is_monthly = (dt.weekday() == 4 and 15 <= dt.day <= 21)
+                d_p, g_p = calculate_greeks(price, row['strike'], T, r, row['impliedVolatility_Put'], 'put')
+                put_deltas.append(d_p)
+                put_gammas.append(g_p)
+
+            df['Call_Delta'] = call_deltas
+            df['Call_Gamma'] = call_gammas
+            df['Put_Delta'] = put_deltas
+            df['Put_Gamma'] = put_gammas
+
+            # حساب Net Gamma & Net Delta الموزونة بالـ Open Interest
+            df['Net_Gamma'] = (df['Call_Gamma'] * df['openInterest_Call']) - (df['Put_Gamma'] * df['openInterest_Put'])
+            df['Net_Delta'] = (df['Call_Delta'] * df['openInterest_Call']) + (df['Put_Delta'] * df['openInterest_Put'])
+
+            # قراءة الـ Order Flow والسيولة اللحظية (Ask vs Bid)
+            def analyze_flow(last, bid, ask, vol, oi):
+                if vol == 0:
+                    return "⚪ خامل"
+                flow_type = ""
+                if vol > oi and oi > 0:
+                    flow_type = "🔥 Spike "
                 
-                # تطبيق الفلتر
-                if view_type == "شهري (الجمعة الثالثة)" and not is_monthly:
-                    continue
-                elif view_type == "أسبوعي / يومي (الاثنين، الأربعاء، الجمعة)" and dt.weekday() not in [0, 2, 4]:
-                    continue
-                
-                label = f"{exp} ({day_name})" + (" - شهري" if is_monthly else "")
-                exp_options.append((label, exp))
+                if ask > bid and last >= ask:
+                    return flow_type + "🟢 Long (تجميع Ask)"
+                elif ask > bid and last <= bid:
+                    return flow_type + "🔴 Short (تفريغ Bid)"
+                return flow_type + "🟡 محايد"
 
-            if exp_options:
-                selected_tuple = st.selectbox(
-                    "اختر تاريخ الانتهاء", 
-                    options=exp_options, 
-                    format_func=lambda x: x[0]
-                )
-                selected_exp = selected_tuple[1]
+            df['Call_Flow'] = df.apply(lambda r: analyze_flow(r['lastPrice_Call'], r['bid_Call'], r['ask_Call'], r['volume_Call'], r['openInterest_Call']), axis=1)
+            df['Put_Flow'] = df.apply(lambda r: analyze_flow(r['lastPrice_Put'], r['bid_Put'], r['ask_Put'], r['volume_Put'], r['openInterest_Put']), axis=1)
 
-                opt = stock.option_chain(selected_exp)
-                
-                calls = opt.calls[['strike', 'lastPrice', 'bid', 'ask', 'openInterest', 'volume']].copy()
-                puts = opt.puts[['strike', 'lastPrice', 'bid', 'ask', 'openInterest', 'volume']].copy()
+            # ملخص بيئة الجاما الإجمالية للأسهم
+            total_net_gamma = df['Net_Gamma'].sum()
+            call_wall_strike = df.loc[df['Call_Gamma'].idxmax()]['strike']
+            put_wall_strike = df.loc[df['Put_Gamma'].idxmax()]['strike']
 
-                # دمج الكول والبوت حسب السترايك
-                df = pd.merge(calls, puts, on='strike', suffixes=('_Call', '_Put'), how='outer').sort_values('strike').fillna(0)
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("السعر الحالي", f"${price:g}")
+            col2.metric("إجمالي Net Gamma", f"{total_net_gamma:,.2f}", delta="بيئة هادئة (Long Gamma)" if total_net_gamma > 0 else "بيئة متذبذبة (Short Gamma)")
+            col3.metric("جدار الكول (Call Wall)", f"${call_wall_strike:g}")
+            col4.metric("جدار البوت (Put Wall)", f"${put_wall_strike:g}")
 
-                # دالة تقدير الاتجاه (Short / Long) بناءً على تنفيذ السعر بين الـ Bid والـ Ask
-                def get_sentiment(last, bid, ask):
-                    if ask > bid and last >= ask:
-                        return "🟢 Long (تجميع/شراء)"
-                    elif ask > bid and last <= bid:
-                        return "🔴 Short (تفريغ/بيع)"
-                    return "⚪ محايد"
+            # الفلترة
+            if num_strikes != "ALL":
+                df['price_diff'] = (df['strike'] - price).abs()
+                df = df.nsmallest(num_strikes, 'price_diff').sort_values('strike')
 
-                df['Call_Sentiment'] = df.apply(lambda r: get_sentiment(r['lastPrice_Call'], r['bid_Call'], r['ask_Call']), axis=1)
-                df['Put_Sentiment'] = df.apply(lambda r: get_sentiment(r['lastPrice_Put'], r['bid_Put'], r['ask_Put']), axis=1)
+            df['STRIKE_FORMATTED'] = df['strike'].apply(lambda x: f"{int(x)}" if x.is_integer() else f"{x:g}")
 
-                # إشارة بناء مراكز جديدة ضخمة/عقود مركبة (Volume > OI)
-                df['Call_Fresh'] = df.apply(lambda r: "⚡ دخول جديد" if r['volume_Call'] > r['openInterest_Call'] and r['volume_Call'] > 100 else "-", axis=1)
-                df['Put_Fresh'] = df.apply(lambda r: "⚡ دخول جديد" if r['volume_Put'] > r['openInterest_Put'] and r['volume_Put'] > 100 else "-", axis=1)
+            # جدول العرض النهائي الموحد
+            df_display = pd.DataFrame({
+                'Call Flow': df['Call_Flow'],
+                'OI Call': df['openInterest_Call'].astype(int),
+                'Delta Call': df['Call_Delta'],
+                'Gamma Call': df['Call_Gamma'],
+                'Net Gamma الصافية': df['Net_Gamma'].round(2),
+                'STRIKE (السترايك)': df['STRIKE_FORMATTED'],
+                'Net Delta الصافية': df['Net_Delta'].round(2),
+                'Gamma Put': df['Put_Gamma'],
+                'Delta Put': df['Put_Delta'],
+                'OI Put': df['openInterest_Put'].astype(int),
+                'Put Flow': df['Put_Flow']
+            })
 
-                # فلترة عدد السترايكات القريبة من سعر السهم
-                if num_strikes != "ALL":
-                    df['price_diff'] = (df['strike'] - price).abs()
-                    df = df.nsmallest(num_strikes, 'price_diff').sort_values('strike')
-                    df = df.drop(columns=['price_diff'])
-
-                # تنسيق السترايك لإلغاء الأصفار العشرية غير الضرورية (مثل 230 بدلاً من 230.0)
-                df['STRIKE_FORMATTED'] = df['strike'].apply(lambda x: f"{int(x)}" if x.is_integer() else f"{x:g}")
-
-                # ترتيب جدول الدفتر المنسق والأنيق
-                df_display = pd.DataFrame({
-                    'نشاط Call': df['Call_Fresh'],
-                    'اتجاه Call': df['Call_Sentiment'],
-                    'OI (Call)': df['openInterest_Call'].astype(int),
-                    'STRIKE (السترايك)': df['STRIKE_FORMATTED'],
-                    'OI (Put)': df['openInterest_Put'].astype(int),
-                    'اتجاه Put': df['Put_Sentiment'],
-                    'نشاط Put': df['Put_Fresh']
-                })
-
-                # عرض الجدول
-                st.dataframe(
-                    df_display.style.highlight_max(subset=['OI (Call)', 'OI (Put)'], color='#1f3a2b'), 
-                    use_container_width=True, 
-                    height=650
-                )
-            else:
-                st.warning("لا توجد عقود مطابقة لنوع الفلتر المحدد.")
-        else:
-            st.warning("لا توجد بيانات خيارات متاحة لهذا السهم.")
+            st.dataframe(
+                df_display.style.background_gradient(subset=['Net Gamma الصافية'], cmap='RdYlGn'),
+                use_container_width=True,
+                height=700
+            )
 
     except Exception as e:
-        st.error(f"حدث خطأ أثناء جلب البيانات: {e}")
+        st.error(f"حدث خطأ: {e}")
