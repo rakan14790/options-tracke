@@ -3,18 +3,25 @@ import yfinance as yf
 import pandas as pd
 
 # إعدادات الصفحة
-st.set_page_config(page_title="محلل التدفق والسيولة - Order Flow & OI", layout="wide")
+st.set_page_config(page_title="سلسلة الخيارات - Webull Style", layout="wide")
 
-st.title("🎯 منظومة تتبع سيولة وتدفق الأوبشن (Order Flow & OI Analysis)")
+# تصميم علوي وألوان شبيهة بـ Webull
+st.markdown("""
+    <style>
+    .stApp { background-color: #0d1117; color: #c9d1d9; }
+    .stDataFrame { border: 1px solid #30363d; }
+    </style>
+""", unsafe_allow_html=True)
+
+st.title("📊 سلسلة الخيارات (Options Chain)")
 
 # القائمة الجانبية
-st.sidebar.header("⚙️ إعدادات التحليل")
+st.sidebar.header("⚙️ إعدادات العرض")
 ticker_symbol = st.sidebar.text_input("رمز السهم", value="NVDA").upper()
 
-# اختيار نوع العقود المعروضة
-option_type_filter = st.sidebar.radio(
+view_mode = st.sidebar.radio(
     "عرض العقود:",
-    options=["الكل (Calls & Puts)", "عقود الكول فقط (Calls)", "عقود البوت فقط (Puts)"]
+    options=["Both (الكول والبوت)", "Calls Only (كول فقط)", "Puts Only (بوت فقط)"]
 )
 
 num_strikes = st.sidebar.select_slider("عدد السترايكات", options=[20, 30, 50, "ALL"], value=30)
@@ -30,22 +37,26 @@ if ticker_symbol:
 
             opt = stock.option_chain(selected_exp)
 
-            calls = opt.calls[['strike', 'bid', 'ask', 'openInterest', 'volume', 'lastPrice']].copy()
-            puts = opt.puts[['strike', 'bid', 'ask', 'openInterest', 'volume', 'lastPrice']].copy()
+            calls = opt.calls[['strike', 'lastPrice', 'bid', 'ask', 'openInterest', 'volume']].copy()
+            puts = opt.puts[['strike', 'lastPrice', 'bid', 'ask', 'openInterest', 'volume']].copy()
 
-            df = pd.merge(calls, puts, on='strike', suffixes=('_Call', '_Put'), how='outer').sort_values('strike').fillna(0)
+            # معالجة الـ Open Interest والـ Volume لمنع ظهور الأصفار الوهمية
+            calls['openInterest'] = calls['openInterest'].fillna(0).astype(int)
+            puts['openInterest'] = puts['openInterest'].fillna(0).astype(int)
+            calls['volume'] = calls['volume'].fillna(0).astype(int)
+            puts['volume'] = puts['volume'].fillna(0).astype(int)
 
-            # تحديد نوع التدفق (Long / Short / Spike)
+            df = pd.merge(calls, puts, on='strike', suffixes=('_Call', '_Put'), how='outer').sort_values('strike')
+
+            # تحليل الاتجاه (Long / Short / Spike)
             def analyze_flow(last, bid, ask, vol, oi):
-                if vol == 0:
+                if vol == 0 and oi == 0:
                     return "⚪ خامل"
                 
                 flow_type = ""
-                # كشف الدخول السريع (Vol أكبر من OI)
                 if vol > oi and oi > 0:
                     flow_type = "🔥 Spike "
                 
-                # التمييز بين الشراء (Long) والبيع (Short)
                 if ask > bid and last >= ask:
                     return flow_type + "🟢 Long"
                 elif ask > bid and last <= bid:
@@ -56,49 +67,46 @@ if ticker_symbol:
             df['Call_Flow'] = df.apply(lambda r: analyze_flow(r['lastPrice_Call'], r['bid_Call'], r['ask_Call'], r['volume_Call'], r['openInterest_Call']), axis=1)
             df['Put_Flow'] = df.apply(lambda r: analyze_flow(r['lastPrice_Put'], r['bid_Put'], r['ask_Put'], r['volume_Put'], r['openInterest_Put']), axis=1)
 
-            # عرض سعر السهم الحالي
-            st.metric("السعر الحالي للسهم", f"${price:g}")
-            st.markdown("---")
+            # شريط السعر الحالي بتنسيق Webull
+            st.info(f"📍 **Stock Price ({ticker_symbol}): ${price:g}**")
 
             # الفلترة حسب عدد السترايكات القريبة من السعر
             if num_strikes != "ALL":
                 df['price_diff'] = (df['strike'] - price).abs()
                 df = df.nsmallest(num_strikes, 'price_diff').sort_values('strike')
 
-            df['STRIKE_FORMATTED'] = df['strike'].apply(lambda x: f"{int(x)}" if x.is_integer() else f"{x:g}")
+            df['STRIKE'] = df['strike'].apply(lambda x: f"${int(x)}" if x.is_integer() else f"${x:g}")
 
-            # بناء الجدول حسب تحديد المستخدم لنوع العقود
-            if option_type_filter == "عقود الكول فقط (Calls)":
+            # بناء الواجهة بحسب نمط Webull (الكول يسار | السترايك منتصف | البوت يمين)
+            if view_mode == "Calls Only (كول فقط)":
                 df_display = pd.DataFrame({
-                    'STRIKE (السترايك)': df['STRIKE_FORMATTED'],
-                    'OI Call': df['openInterest_Call'].astype(int),
-                    'Vol Call': df['volume_Call'].astype(int),
-                    'Call Flow (الحالة)': df['Call_Flow']
+                    'Flow (Calls)': df['Call_Flow'],
+                    'Volume (Call)': df['volume_Call'],
+                    'Open Int (Call)': df['openInterest_Call'],
+                    'STRIKE': df['STRIKE']
                 })
-
-            elif option_type_filter == "عقود البوت فقط (Puts)":
+            elif view_mode == "Puts Only (بوت فقط)":
                 df_display = pd.DataFrame({
-                    'STRIKE (السترايك)': df['STRIKE_FORMATTED'],
-                    'OI Put': df['openInterest_Put'].astype(int),
-                    'Vol Put': df['volume_Put'].astype(int),
-                    'Put Flow (الحالة)': df['Put_Flow']
+                    'STRIKE': df['STRIKE'],
+                    'Open Int (Put)': df['openInterest_Put'],
+                    'Volume (Put)': df['volume_Put'],
+                    'Flow (Puts)': df['Put_Flow']
                 })
-
-            else:  # الكل
+            else: # Both (التنسيق المطابق لـ Webull)
                 df_display = pd.DataFrame({
-                    'STRIKE (السترايك)': df['STRIKE_FORMATTED'],
-                    'OI Call': df['openInterest_Call'].astype(int),
-                    'Vol Call': df['volume_Call'].astype(int),
-                    'Call Flow': df['Call_Flow'],
-                    'OI Put': df['openInterest_Put'].astype(int),
-                    'Vol Put': df['volume_Put'].astype(int),
-                    'Put Flow': df['Put_Flow']
+                    'Flow (Call)': df['Call_Flow'],
+                    'Vol (Call)': df['volume_Call'],
+                    'Open Int (Call)': df['openInterest_Call'],
+                    'STRIKE': df['STRIKE'],
+                    'Open Int (Put)': df['openInterest_Put'],
+                    'Vol (Put)': df['volume_Put'],
+                    'Flow (Put)': df['Put_Flow']
                 })
 
             st.dataframe(
                 df_display,
                 use_container_width=True,
-                height=750
+                height=700
             )
 
     except Exception as e:
