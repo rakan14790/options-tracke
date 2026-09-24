@@ -26,9 +26,6 @@ st.markdown("""
         padding: 20px;
         margin-bottom: 25px;
     }
-    .buy-signal { color: #2ea043; font-weight: bold; }
-    .sell-signal { color: #da3633; font-weight: bold; }
-    .neutral-signal { color: #d29922; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -38,8 +35,8 @@ st.title("⚡ منصة الراصد الذكي والتوصيات المخصصة
 LOG_FILE = "recommendations_targets_log.csv"
 if not os.path.exists(LOG_FILE):
     df_empty = pd.DataFrame(columns=[
-        "Date", "Ticker", "Type", "Strike", "Expiration", 
-        "Entry_Contract_Price", "Target_1", "Target_2", "Stop_Loss", "Status"
+        "ID", "Date", "Ticker", "Type", "Strike", "Expiration", 
+        "Entry_Contract_Price", "Target_1", "Target_2", "Stop_Loss"
     ])
     df_empty.to_csv(LOG_FILE, index=False)
 
@@ -60,13 +57,12 @@ if ticker_symbol:
         change = price - prev_close
         pct_change = (change / prev_close) * 100
         
-        # 1. تحليل الاتجاهات والزخم (الاتجاه العام واللحظي دون إزالة أي عنصر)
+        # 1. تحليل الاتجاهات والزخم
         hist = stock.history(period="5d", interval="15m")
         
         if not hist.empty:
             sma20 = hist['Close'].rolling(20).mean().iloc[-1]
             sma50 = hist['Close'].rolling(50).mean().iloc[-1]
-            vol_mom = hist['Volume'].iloc[-1] - hist['Volume'].mean()
             
             if price > sma20 and sma20 > sma50:
                 overall_trend = "صاعد قوي 🚀"
@@ -86,7 +82,7 @@ if ticker_symbol:
         else:
             overall_trend, instant_trend, momentum_status, signal_type = "غير متاح", "غير متاح", "غير متاح", "NEUTRAL"
 
-        # عرض ملخص السهم الكامل
+        # عرض ملخص السهم
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.markdown(f"<div class='card-box'><h4>السعر اللحظي</h4><h2>${price:.2f}</h2><p>{'🟢' if change>=0 else '🔴'} {change:+.2f} ({pct_change:+.2f}%)</p></div>", unsafe_allow_html=True)
@@ -99,14 +95,13 @@ if ticker_symbol:
 
         st.divider()
 
-        # 2. توليد التوصية الدقيقة بعقد لا يتجاوز 2$ مع الأهداف
+        # 2. توليد التوصية المباشرة
         st.subheader("🎯 التوصية المباشرة (شرط سعر العقد ≤ $2.00)")
         expirations = stock.options
         
         if expirations:
             target_exp = expirations[0]
             opt = stock.option_chain(target_exp)
-            
             selected_contract = None
             
             if signal_type == "CALL":
@@ -131,13 +126,12 @@ if ticker_symbol:
                 target_1 = contract_price * 1.20
                 target_2 = contract_price * 1.50
                 stop_loss = contract_price * 0.80
-                
                 border_color = "#2ea043" if c_type == "CALL" else "#da3633"
                 
                 st.markdown(f"""
                 <div class='recommendation-box' style='border-color: {border_color};'>
                     <h3>🟢 التوصية الدقيقة: {ticker_symbol} - ${strike_price:g} {c_type}</h3>
-                    <p><b>تاريخ الانتهاء:</b> {target_exp} | <b>سعر دخول العقد:</b> <span style='color:#f0883e; font-size:1.3em;'>${contract_price:.2f}</span> (أقل من ${max_contract_price:.2f})</p>
+                    <p><b>تاريخ الانتهاء:</b> {target_exp} | <b>سعر دخول العقد:</b> <span style='color:#f0883e; font-size:1.3em;'>${contract_price:.2f}</span></p>
                     <hr style='border-color: #30363d;'>
                     <div style='display: flex; justify-content: space-around; text-align: center;'>
                         <div><h4>🎯 الهدف الأول (+20%)</h4><h3 style='color: #2ea043;'>${target_1:.2f}</h3></div>
@@ -147,9 +141,11 @@ if ticker_symbol:
                 </div>
                 """, unsafe_allow_html=True)
 
-                if st.button("📌 حفظ التوصية والأهداف لتتبع الأداء"):
+                if st.button("📌 حفظ التوصية في جدول المتابعة"):
                     log_df = pd.read_csv(LOG_FILE)
+                    new_id = int(datetime.now().timestamp())
                     new_row = {
+                        "ID": new_id,
                         "Date": datetime.now().strftime('%Y-%m-%d %H:%M'),
                         "Ticker": ticker_symbol,
                         "Type": c_type,
@@ -158,30 +154,29 @@ if ticker_symbol:
                         "Entry_Contract_Price": contract_price,
                         "Target_1": target_1,
                         "Target_2": target_2,
-                        "Stop_Loss": stop_loss,
-                        "Status": "Active"
+                        "Stop_Loss": stop_loss
                     }
                     log_df = pd.concat([log_df, pd.DataFrame([new_row])], ignore_index=True)
                     log_df.to_csv(LOG_FILE, index=False)
-                    st.success("تم حفظ التوصية والأهداف بنجاح!")
+                    st.success("تم حفظ الصفقة في جدول المتابعة بنجاح!")
             else:
-                st.info(f"لا يوجد عقد {signal_type} مستوفٍ للسيولة بسعر أقل من أو يساوي ${max_contract_price:.2f} حالياً لهذا التاريخ.")
+                st.info(f"لا يوجد عقد {signal_type} بسعر أقل من ${max_contract_price:.2f} حالياً.")
 
         st.divider()
 
-        # 3. سجل متابعة أداء التوصيات وتتبع السعر مع إمكانية الحذف
-        st.subheader("📈 سجل متابعة أداء التوصيات وحذف المنتهي منها")
+        # 3. جدول متابعة الصفقات المنظم مع زر الحذف التفاعلي
+        st.subheader("📈 جدول متابعة الصفقات الحالية")
         log_df = pd.read_csv(LOG_FILE)
         
         if not log_df.empty:
+            rows_data = []
             for idx, row in log_df.iterrows():
                 t_ticker = row['Ticker']
                 t_strike = float(row['Strike'])
                 t_type = row['Type']
                 t_exp = row['Expiration']
                 entry_price = float(row['Entry_Contract_Price'])
-                t1 = float(row['Target_1'])
-                t2 = float(row['Target_2'])
+                t1, t2 = float(row['Target_1']), float(row['Target_2'])
                 
                 try:
                     s_ticker = yf.Ticker(t_ticker)
@@ -190,100 +185,86 @@ if ticker_symbol:
                     matched = chain[chain['strike'] == t_strike]
                     
                     if not matched.empty:
-                        curr_p = matched['lastPrice'].values[0]
+                        curr_p = float(matched['lastPrice'].values[0])
                         roi = ((curr_p - entry_price) / entry_price) * 100
                         
                         if curr_p >= t2:
-                            achievement = "🚀 تحقّق الهدف الثاني (+50%)"
+                            achievement = "🚀 الهدف 2 (+50%)"
                         elif curr_p >= t1:
-                            achievement = "🎯 تحقّق الهدف الأول (+20%)"
+                            achievement = "🎯 الهدف 1 (+20%)"
                         elif curr_p < entry_price * 0.8:
-                            achievement = "🛑 ضرب وقف الخسارة"
+                            achievement = "🛑 وقف الخسارة"
                         else:
                             achievement = "⏳ قيد التداول"
                     else:
                         curr_p = "منتهي"
-                        roi = 0
+                        roi = 0.0
                         achievement = "⚪ انتهى العقد"
                 except:
                     curr_p = entry_price
-                    roi = 0
+                    roi = 0.0
                     achievement = "🔄 جاري التحديث"
 
-                col_det, col_del = st.columns([5, 1])
-                with col_det:
-                    curr_p_str = f"${curr_p:.2f}" if isinstance(curr_p, float) else curr_p
-                    st.markdown(f"""
-                    <b>{row['Date']}</b> | <b>{t_ticker} ${t_strike:g} {t_type}</b> ({t_exp}) | 
-                    دخول: <b>${entry_price:.2f}</b> | الهدف 1: <b>${t1:.2f}</b> | الهدف 2: <b>${t2:.2f}</b> | 
-                    السعر الحالي: <b>{curr_p_str}</b> | ROI: <b>{roi:+.1f}%</b> | <b>{achievement}</b>
-                    """)
-                with col_del:
-                    if st.button("🗑️ حذف", key=f"del_{idx}"):
-                        log_df = log_df.drop(idx)
-                        log_df.to_csv(LOG_FILE, index=False)
-                        st.rerun()
-                st.divider()
+                rows_data.append({
+                    "رمز الصفقة": int(row['ID']) if 'ID' in row and not pd.isna(row['ID']) else idx,
+                    "التاريخ": row['Date'],
+                    "الشركة والعقد": f"{t_ticker} ${t_strike:g} {t_type}",
+                    "تاريخ الانتهاء": t_exp,
+                    "سعر الدخول": f"${entry_price:.2f}",
+                    "الهدف 1": f"${t1:.2f}",
+                    "الهدف 2": f"${t2:.2f}",
+                    "السعر الحالي": f"${curr_p:.2f}" if isinstance(curr_p, float) else curr_p,
+                    "الربح/الخسارة": f"{roi:+.1f}%",
+                    "الحالة": achievement
+                })
+            
+            df_track = pd.DataFrame(rows_data)
+            st.dataframe(df_track, use_container_width=True)
+            
+            # قسم خيارات الحذف السريعة للصفقات المنتهية
+            del_id = st.selectbox("اختر الصفقة لحذفها من الجدول:", options=df_track["رمز الصفقة"].tolist())
+            if st.button("🗑️ حذف الصفقة المحددة"):
+                if 'ID' in log_df.columns:
+                    log_df = log_df[log_df['ID'] != del_id]
+                else:
+                    log_df = log_df.drop(del_id)
+                log_df.to_csv(LOG_FILE, index=False)
+                st.rerun()
         else:
-            st.info("لا توجد توصيات محفوظة ومتبعة حالياً.")
+            st.info("لا توجد صفقات في جدول المتابعة حالياً.")
 
         st.divider()
 
-        # 4. جدول تدفق صفقات الحيتان (السترايكات القريبة والعقود الملحوظة ذات الفوليوم العالي فقط)
-        st.subheader("🐋 رصد صفقات الحيتان (السترايكات القريبة والفوليوم العالي فقط)")
+        # 4. جدول تدفق صفقات الحيتان الشامل لسعر العقد والسترايكات
+        st.subheader("🐋 رصد صفقات الحيتان (يشمل سعر العقد والفوليوم العالي)")
         selected_exp = st.selectbox("عرض صفقات الحيتان حسب التاريخ:", options=expirations[:3])
         opt_data = stock.option_chain(selected_exp)
         
         calls_df, puts_df = opt_data.calls.copy(), opt_data.puts.copy()
-        calls_df['Type'], puts_df['Type'] = 'Call', 'Put'
+        calls_df['Type'], puts_df['Type'] = 'Call 🟢', 'Put 🔴'
         df_all = pd.concat([calls_df, puts_df])
         df_all['Trade_Value'] = df_all['volume'] * df_all['lastPrice'] * 100
         
-        # 1) تصفية السترايكات القريبة من السعر فقط (في حدود ±10% من سعر السهم اللحظي)
-        lower_bound = price * 0.90
-        upper_bound = price * 1.10
+        # تصفية السترايكات القريبة والفوليوم العالي
+        lower_bound, upper_bound = price * 0.90, price * 1.10
         whales = df_all[(df_all['strike'] >= lower_bound) & (df_all['strike'] <= upper_bound)].copy()
-        
-        # 2) تصفية الصفقات الكبيرة والملحوظة ذات الفوليوم العالي
         whales = whales[(whales['Trade_Value'] >= whale_filter) & (whales['volume'] >= min_vol_filter)].copy()
         
         if not whales.empty:
-            def analyze_whale(r):
-                val = r['Trade_Value']
-                opt_type = r['Type']
-                vol = r['volume']
-                last, ask, bid = r['lastPrice'], r['ask'], r['bid']
-                
-                entity = "🔥 🐋 صفقة ملحوظة (فوليوم ضخم)" if vol >= 1500 else "🐳 حوت متوسط"
-                
-                if ask > 0 and last >= ask:
-                    action = "شراء Ask 🟢"
-                    sig = "🚀 دخول صاعد ملحوظ" if opt_type == 'Call' else "🐻 رهان هبوطي ملحوظ"
-                elif bid > 0 and last <= bid:
-                    action = "بيع Bid 🔴"
-                    sig = "⚠️ تفريغ / شورت" if opt_type == 'Call' else "🛡️ بيع بوت (دعم)"
-                else:
-                    action = "تنفيذ محايد 🟡"
-                    sig = "⚪ صفقة موازنة"
-                    
-                return pd.Series([entity, action, sig])
-
-            whales[['Entity', 'Execution', 'Signal']] = whales.apply(analyze_whale, axis=1)
-            
             df_display = pd.DataFrame({
-                'النوع': whales['Type'].apply(lambda x: 'Call 🟢' if x == 'Call' else 'Put 🔴'),
-                'السترايك (قريب من السعر)': whales['strike'].apply(lambda x: f"${x:g}"),
+                'النوع': whales['Type'],
+                'السترايك': whales['strike'].apply(lambda x: f"${x:g}"),
+                'سعر العقد (Price)': whales['lastPrice'].apply(lambda x: f"${x:.2f}"),
                 'تاريخ العقد': selected_exp,
                 'عدد العقود (Volume)': whales['volume'].fillna(0).astype(int),
-                'سعر التنفيذ': whales['lastPrice'].apply(lambda x: f"${x:.2f}"),
-                'قيمة الصفقة': whales['Trade_Value'].apply(lambda x: f"${x/1000:.1f}K" if x < 1000000 else f"${x/1000000:.2f}M"),
-                'حالة الصفقة': whales['Entity'],
-                'توقعات الحركة': whales['Signal']
+                'سعر العرض (Ask)': whales['ask'].apply(lambda x: f"${x:.2f}"),
+                'سعر الطلب (Bid)': whales['bid'].apply(lambda x: f"${x:.2f}"),
+                'قيمة الصفقة الإجمالية': whales['Trade_Value'].apply(lambda x: f"${x/1000:.1f}K" if x < 1000000 else f"${x/1000000:.2f}M")
             }).sort_values('عدد العقود (Volume)', ascending=False)
 
-            st.dataframe(df_display, use_container_width=True, height=400)
+            st.dataframe(df_display, use_container_width=True, height=450)
         else:
-            st.info(f"لا توجد صفقات حيتان ملحوظة بفوليوم عالي قريبة من السعر حالياً (${price:.2f}).")
+            st.info(f"لا توجد صفقات حيتان ملحوظة قريبة من السعر حالياً (${price:.2f}).")
 
     except Exception as e:
         st.error(f"حدث خطأ أثناء تحميل البيانات: {e}")
