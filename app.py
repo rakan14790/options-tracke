@@ -2,66 +2,87 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 from datetime import datetime
 import os
 
-# 1. إعدادات الصفحة والستايل
-st.set_page_config(page_title="Institutional GEX & Liquidity Hub", layout="wide")
+# 1. تهيئة الصفحة والستايل الفاخر
+st.set_page_config(page_title="Alpha Capital | Institutional Options Terminal", layout="wide", page_icon="💎")
 
 st.markdown("""
     <style>
-    .stApp { background-color: #080a0f; color: #e1e4e8; }
-    .metric-card {
-        background: linear-gradient(145deg, #0e121b, #151a26);
-        border: 1px solid #232a3b;
-        border-radius: 12px;
-        padding: 16px;
-        text-align: center;
+    .stApp { background-color: #06080c; color: #f0f6fc; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    
+    .gold-header {
+        background: linear-gradient(90deg, #d4af37, #f3e5ab, #aa771c);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-weight: 800;
     }
-    .recommendation-box {
-        background: linear-gradient(135deg, #0d2016 0%, #11291b 100%);
+    
+    .hero-card {
+        background: linear-gradient(135deg, #0d1117 0%, #161b22 100%);
+        border: 1px solid #30363d;
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+    
+    .trade-card-call {
+        background: linear-gradient(135deg, #062b16 0%, #0d4429 100%);
         border: 2px solid #2ea043;
-        border-radius: 14px;
-        padding: 22px;
-        margin-bottom: 25px;
+        border-radius: 16px;
+        padding: 24px;
+        box-shadow: 0 10px 30px rgba(46, 160, 67, 0.2);
     }
-    .wait-box {
-        background: linear-gradient(135deg, #241a0e 0%, #2e2111 100%);
+    
+    .trade-card-put {
+        background: linear-gradient(135deg, #3c0d12 0%, #67161d 100%);
+        border: 2px solid #da3633;
+        border-radius: 16px;
+        padding: 24px;
+        box-shadow: 0 10px 30px rgba(218, 54, 51, 0.2);
+    }
+
+    .wait-card {
+        background: linear-gradient(135deg, #271d0c 0%, #433013 100%);
         border: 2px solid #d29922;
-        border-radius: 14px;
-        padding: 22px;
-        margin-bottom: 25px;
+        border-radius: 16px;
+        padding: 24px;
+    }
+
+    .stat-badge {
+        background-color: #21262d;
+        border-radius: 8px;
+        padding: 8px 14px;
+        font-size: 0.9em;
+        border: 1px solid #30363d;
     }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("⚡ منصة القاما والسيولة العمقية | GEX & Liquidity Hub")
-
+# 2. ملف حفظ وحساب المفضلة
 LOG_FILE = "favorites_log.csv"
 if not os.path.exists(LOG_FILE):
     df_empty = pd.DataFrame(columns=[
         "Date", "Ticker", "Type", "Strike", "Expiration", 
-        "Entry_Contract_Price", "Target_1", "Target_2", "Stop_Loss"
+        "Entry_Price", "Target_1", "Target_2", "Target_3", "Stop_Loss", "Contracts"
     ])
     df_empty.to_csv(LOG_FILE, index=False)
 
-def format_gex_val(val):
-    abs_val = abs(val)
-    if abs_val >= 1e9:
-        return f"{val/1e9:.2f}B"
-    elif abs_val >= 1e6:
-        return f"{val/1e6:.1f}M"
-    elif abs_val >= 1e3:
-        return f"{val/1e3:.0f}K"
-    else:
-        return f"{val:.0f}"
+# 3. الهيدر الرئيسي
+st.markdown("<h1 class='gold-header'>💎 ALPHA CAPITAL | المنصة الرقمية للتداول المؤسسي</h1>", unsafe_allow_html=True)
+st.caption("🚀 محرك الخوارزميات المتقدم لاقتناص العقود مرتفعة الانفجار وحماية المحفظة")
 
-# 2. القائمة الجانبية
-st.sidebar.header("🎯 إعدادات السهم والتاريخ")
-ticker_symbol = st.sidebar.text_input("رمز السهم", value="NVDA").upper()
+# 4. القائمة الجانبية (شريط التحكم وإدارة رأس المال)
+st.sidebar.markdown("### ⚙️ إدارة الحساب ورأس المال")
+portfolio_size = st.sidebar.number_input("إجمالي رأس المال المخصص ($)", value=2000, step=250)
+risk_per_trade_pct = st.sidebar.slider("نسبة المخاطرة القصوى للصفقة (%)", min_value=5, max_value=25, value=10)
+
+max_trade_budget = portfolio_size * (risk_per_trade_pct / 100.0)
+
+st.sidebar.divider()
+st.sidebar.markdown("### 🔍 تحديد السهم والمُهل")
+ticker_symbol = st.sidebar.text_input("رمز السهم (Ticker)", value="NVDA").upper()
 
 if ticker_symbol:
     try:
@@ -75,13 +96,14 @@ if ticker_symbol:
         
         all_expirations = stock.options
 
-        target_expiration = None
         if all_expirations:
-            target_expiration = st.sidebar.selectbox("اختر تاريخ الانتهاء المطلوب:", all_expirations)
+            target_expiration = st.sidebar.selectbox("📅 اختر تاريخ انتهاء العقد:", all_expirations)
+        else:
+            target_expiration = None
 
-        max_contract_price = st.sidebar.number_input("الحد الأقصى لسعر العقد ($)", value=1.50, step=0.10)
+        max_contract_price = st.sidebar.number_input("أقصى سعر للعقد المفرد ($)", value=2.00, step=0.10)
 
-        # 3. جلب وحساب القاما والسيولة
+        # 5. تحليل السيولة وصافي القاما (GEX)
         if target_expiration:
             opt = stock.option_chain(target_expiration)
             c_df, p_df = opt.calls.copy(), opt.puts.copy()
@@ -104,304 +126,154 @@ if ticker_symbol:
 
             gex_merged = pd.merge(gex_calls, gex_puts, on='strike', how='outer').fillna(0)
             gex_merged['Net_GEX'] = gex_merged['Call_GEX'] + gex_merged['Put_GEX']
-            gex_merged = gex_merged.sort_values('strike').reset_index(drop=True)
-
+            
             gex_near = gex_merged[(gex_merged['strike'] >= price * 0.85) & (gex_merged['strike'] <= price * 1.15)].copy()
 
             if not gex_near.empty:
                 call_wall = gex_near.sort_values('Call_GEX', ascending=False).iloc[0]['strike']
                 put_wall = gex_near.sort_values('Put_GEX', ascending=True).iloc[0]['strike']
-
                 zero_cross = gex_near[gex_near['Net_GEX'] >= 0]
-                if not zero_cross.empty:
-                    gamma_flip = zero_cross.iloc[0]['strike']
-                else:
-                    gamma_flip = (call_wall + put_wall) / 2
+                gamma_flip = zero_cross.iloc[0]['strike'] if not zero_cross.empty else (call_wall + put_wall) / 2
             else:
                 call_wall, put_wall, gamma_flip = price, price, price
-
-            v_calls = c_df.groupby('strike')['volume'].sum().reset_index().rename(columns={'volume': 'Call_Vol'})
-            v_puts = p_df.groupby('strike')['volume'].sum().reset_index().rename(columns={'volume': 'Put_Vol'})
-            vol_merged = pd.merge(v_calls, v_puts, on='strike', how='outer').fillna(0)
-            vol_near = vol_merged[(vol_merged['strike'] >= price * 0.90) & (vol_merged['strike'] <= price * 1.10)].sort_values('strike')
-
         else:
             call_wall, put_wall, gamma_flip = price, price, price
             call_ratio_pct = 50.0
-            gex_near = pd.DataFrame()
-            vol_near = pd.DataFrame()
 
-        # 4. بطاقات القياس اللحظية
-        col1, col2, col3, col4, col5 = st.columns(5)
-        with col1:
-            st.markdown(f"<div class='metric-card'><h4>السعر اللحظي</h4><h2>${price:.2f}</h2><p>{'🟢' if change>=0 else '🔴'} {change:+.2f} ({pct_change:+.2f}%)</p></div>", unsafe_allow_html=True)
-        with col2:
-            st.markdown(f"<div class='metric-card'><h4>مستوى الفليب</h4><h2 style='color:#a371f7;'>${gamma_flip:.2f}</h2><p>Zero Gamma Flip</p></div>", unsafe_allow_html=True)
-        with col3:
-            st.markdown(f"<div class='metric-card'><h4>(Call Wall) جدار القاما</h4><h2 style='color:#2ea043;'>${call_wall:g}</h2><p>هدف المقاومة/الرصد</p></div>", unsafe_allow_html=True)
-        with col4:
-            st.markdown(f"<div class='metric-card'><h4>(Put Wall) جدار البوت</h4><h2 style='color:#da3633;'>${put_wall:g}</h2><p>مستوى الدعم الرئيسي</p></div>", unsafe_allow_html=True)
-        with col5:
-            buyer_status = "سيطرة الشرائيين 🟢" if call_ratio_pct >= 50 else "سيطرة البائعين 🔴"
-            st.markdown(f"<div class='metric-card'><h4>خلل التدفق (Call/Put Ratio)</h4><h2>{call_ratio_pct:.1f}%</h2><p>{buyer_status}</p></div>", unsafe_allow_html=True)
+        # 6. لوحة مؤشرات الأداء الحية
+        st.markdown(f"""
+        <div class='hero-card'>
+            <div style='display: flex; justify-content: space-between; align-items: center;'>
+                <div>
+                    <h2 style='margin:0;'>{ticker_symbol} <span style='font-size:0.6em; color:#8b949e;'>السعر اللحظي</span></h2>
+                    <h1 style='margin:0; font-size: 2.8em; color:#ffffff;'>${price:.2f} 
+                        <span style='font-size:0.4em; color:{'#2ea043' if change>=0 else '#da3633'};'>({change:+.2f} / {pct_change:+.2f}%)</span>
+                    </h1>
+                </div>
+                <div style='display:flex; gap:15px;'>
+                    <div class='stat-badge'><b>Zero Gamma Flip:</b><br><span style='color:#a371f7; font-size:1.2em;'>${gamma_flip:.2f}</span></div>
+                    <div class='stat-badge'><b>Call Wall (المقاومة):</b><br><span style='color:#2ea043; font-size:1.2em;'>${call_wall:g}</span></div>
+                    <div class='stat-badge'><b>Put Wall (الدعم):</b><br><span style='color:#da3633; font-size:1.2em;'>${put_wall:g}</span></div>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
-        st.divider()
+        st.markdown("<br>", unsafe_allow_html=True)
 
-        # 📈 5. شارت ATAS الاحترافي والاعتمادي
-        st.subheader(f"🖥️ شارت احترافي (نمط ATAS) - الفوليوم بروفايل ومستويات القاما ({ticker_symbol})")
-        
-        try:
-            # جلب البيانات التاريخية بشكل مباشر مع التضمين المضمون للأعمدة
-            hist = yf.download(ticker_symbol, period="3m", interval="1d", auto_adjust=True, progress=False)
-            
-            if hist.empty:
-                hist = yf.download(ticker_symbol, period="1m", interval="1d", auto_adjust=True, progress=False)
-
-            if not hist.empty:
-                # تسوية الأعمدة إذا كانت MultiIndex
-                if isinstance(hist.columns, pd.MultiIndex):
-                    hist.columns = [col[0] for col in hist.columns]
-
-                # التأكد من صحة الأعمدة المطلوبة
-                required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
-                if all(col in hist.columns for col in required_cols):
-                    
-                    # 1. حساب الفوليوم بروفايل الجانبي (Volume Profile)
-                    price_min = float(hist['Low'].min())
-                    price_max = float(hist['High'].max())
-                    bins = np.linspace(price_min, price_max, 35)
-                    vol_profile = np.zeros(len(bins)-1)
-
-                    for _, row in hist.iterrows():
-                        high_val = float(row['High'])
-                        low_val = float(row['Low'])
-                        vol_val = float(row['Volume'])
-                        
-                        # توزيع الفوليوم بين أعلى وأقل سعر لليوم
-                        idx = np.digitize((high_val + low_val) / 2, bins) - 1
-                        if 0 <= idx < len(vol_profile):
-                            vol_profile[idx] += vol_val
-
-                    bin_centers = (bins[:-1] + bins[1:]) / 2
-
-                    # 2. إنشاء Subplots بثلاثة أقسام: شموع + فوليوم سفلي + فوليوم بروفايل جانبي
-                    fig_atas = make_subplots(
-                        rows=2, cols=2,
-                        column_widths=[0.82, 0.18],
-                        row_heights=[0.8, 0.2],
-                        shared_yaxes=True,
-                        horizontal_spacing=0.01,
-                        vertical_spacing=0.02,
-                        specs=[[{"type": "candlestick"}, {"type": "bar"}],
-                               [{"type": "bar"}, None]]
-                    )
-
-                    # رسم الشموع اليابانية
-                    fig_atas.add_trace(go.Candlestick(
-                        x=hist.index,
-                        open=hist['Open'],
-                        high=hist['High'],
-                        low=hist['Low'],
-                        close=hist['Close'],
-                        name="السعر",
-                        increasing_line_color='#2ea043',
-                        decreasing_line_color='#da3633'
-                    ), row=1, col=1)
-
-                    # رسم الفوليوم السفلي
-                    colors_vol = ['#2ea043' if float(c) >= float(o) else '#da3633' for c, o in zip(hist['Close'], hist['Open'])]
-                    fig_atas.add_trace(go.Bar(
-                        x=hist.index,
-                        y=hist['Volume'],
-                        marker_color=colors_vol,
-                        name="الحجم اليومي",
-                        showlegend=False
-                    ), row=2, col=1)
-
-                    # رسم الفوليوم بروفايل الجانبي (ATAS Style)
-                    fig_atas.add_trace(go.Bar(
-                        x=vol_profile,
-                        y=bin_centers,
-                        orientation='h',
-                        marker=dict(
-                            color='rgba(56, 139, 253, 0.45)',
-                            line=dict(color='#388bfd', width=1)
-                        ),
-                        name="Volume Profile",
-                        showlegend=False
-                    ), row=1, col=2)
-
-                    # رسم مستويات القاما على الشارت الرئيسي
-                    fig_atas.add_hline(y=gamma_flip, line_dash="dash", line_color="#a371f7", line_width=2,
-                                      annotation_text=f"Gamma Flip (${gamma_flip:.2f})", annotation_position="top left", row=1, col=1)
-                    fig_atas.add_hline(y=call_wall, line_dash="dot", line_color="#2ea043", line_width=2,
-                                      annotation_text=f"Call Wall (${call_wall:g})", annotation_position="top left", row=1, col=1)
-                    fig_atas.add_hline(y=put_wall, line_dash="dot", line_color="#da3633", line_width=2,
-                                      annotation_text=f"Put Wall (${put_wall:g})", annotation_position="bottom left", row=1, col=1)
-
-                    # إعدادات المظهر المظلم والاحترافي
-                    fig_atas.update_layout(
-                        template="plotly_dark",
-                        paper_bgcolor="#080a0f",
-                        plot_bgcolor="#0e121b",
-                        xaxis_rangeslider_visible=False,
-                        xaxis2_rangeslider_visible=False,
-                        margin=dict(l=10, r=10, t=20, b=10),
-                        height=530,
-                        showlegend=False
-                    )
-
-                    fig_atas.update_xaxes(gridcolor='#1b2230', row=1, col=1)
-                    fig_atas.update_yaxes(gridcolor='#1b2230', row=1, col=1)
-                    fig_atas.update_xaxes(visible=False, row=1, col=2)
-
-                    st.plotly_chart(fig_atas, use_container_width=True)
-                else:
-                    st.warning("⚠️ تعذر مطابقة هيكل بيانات السهم بشكل صحيح.")
-            else:
-                st.warning("⚠️ تعذر جلب البيانات التاريخية لهذا السهم حالياً من المصدر.")
-        except Exception as chart_err:
-            st.error(f"⚠️ خطأ أثناء بناء شارت السهم: {chart_err}")
-
-        st.divider()
-
-        # 6. عرض شارت Net GEX
-        st.subheader(f"📊 شارت القاما الصافية (Net GEX) - الانتهاء: [{target_expiration}]")
-
-        if not gex_near.empty and gex_near['Net_GEX'].abs().sum() > 0:
-            fig, ax = plt.subplots(figsize=(10, 5))
-            fig.patch.set_facecolor('#080a0f')
-            ax.set_facecolor('#0e121b')
-
-            colors = ['#2ea043' if val >= 0 else '#da3633' for val in gex_near['Net_GEX']]
-            bars = ax.barh(gex_near['strike'], gex_near['Net_GEX'], color=colors, height=0.6)
-
-            max_abs_gex = gex_near['Net_GEX'].abs().max()
-            for bar, val in zip(bars, gex_near['Net_GEX']):
-                if abs(val) > 0:
-                    text_x = bar.get_width()
-                    ha = 'left' if text_x >= 0 else 'right'
-                    offset = (max_abs_gex * 0.015) if text_x >= 0 else -(max_abs_gex * 0.015)
-                    ax.text(text_x + offset, bar.get_y() + bar.get_height()/2, format_gex_val(val),
-                            va='center', ha=ha, color='#ffffff', fontsize=8, fontweight='bold')
-
-            ax.axhline(price, color='#38d430', linestyle='--', linewidth=2, label=f'السعر الحالي (${price:.2f})')
-            ax.axhline(gamma_flip, color='#a371f7', linestyle=':', linewidth=2, label=f'Gamma Flip (${gamma_flip:.2f})')
-
-            ax.set_ylabel('سعر الإضراب Strike ($)', color='#e1e4e8', fontsize=11)
-            ax.set_xlabel('صافي القاما Net GEX ($)', color='#e1e4e8', fontsize=11)
-            ax.tick_params(colors='#e1e4e8')
-            ax.grid(color='#1b2230', linestyle='--', alpha=0.5)
-            ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: format_gex_val(x)))
-            ax.legend(facecolor='#0e121b', edgecolor='#232a3b', labelcolor='#e1e4e8')
-
-            st.pyplot(fig)
-        else:
-            st.warning("⚠️ لا توجد بيانات قاما كافية للتاريخ المحدد.")
-
-        st.divider()
-
-        # 7. شارت عمق السيولة
-        st.subheader(f"📊 عمق السيولة وتوزيع الفوليوم ({ticker_symbol})")
-        if not vol_near.empty:
-            fig_vol, ax_v = plt.subplots(figsize=(10, 4.5))
-            fig_vol.patch.set_facecolor('#080a0f')
-            ax_v.set_facecolor('#0e121b')
-
-            strikes = vol_near['strike'].tolist()
-            c_v = vol_near['Call_Vol'].tolist()
-            p_v = vol_near['Put_Vol'].tolist()
-
-            ax_v.bar(strikes, c_v, color='#1f6feb', width=1.2, label='سيولة الكول (Call Vol)')
-            ax_v.bar(strikes, p_v, bottom=c_v, color='#388bfd', alpha=0.6, width=1.2, label='سيولة البوت (Put Vol)')
-
-            ax_v.set_ylabel('حجم العقود', color='#e1e4e8', fontsize=10)
-            ax_v.set_xlabel('سعر الإضراب Strike ($)', color='#e1e4e8', fontsize=10)
-            ax_v.tick_params(colors='#e1e4e8')
-            ax_v.grid(color='#1b2230', linestyle='--', alpha=0.4)
-            ax_v.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: f"{int(x/1000)}K" if x>=1000 else f"{int(x)}"))
-            ax_v.legend(facecolor='#0e121b', edgecolor='#232a3b', labelcolor='#e1e4e8')
-
-            st.pyplot(fig_vol)
-
-        st.divider()
-
-        # 8. التوصية الفورية + سبب الاختيار
-        st.subheader("🎯 التوصية الفورية")
+        # 7. التقييم الخوارزمي والتوصية الذكية
         signal_type = "NEUTRAL"
-        reason_text = ""
+        confidence_score = 0
 
-        if price > gamma_flip:
+        dist_from_flip = ((price - gamma_flip) / gamma_flip) * 100
+
+        if price > gamma_flip and call_ratio_pct >= 52:
             signal_type = "CALL"
-            reason_text = f"السعر اللحظي (${price:.2f}) أعلى من مستوى الفليب Gamma Flip (${gamma_flip:.2f}) مما يدعم استمرار الزخم الصعودي وتفوق سيطرة الشرائيين."
-        elif price < gamma_flip:
+            confidence_score = min(98, int(60 + abs(dist_from_flip)*5 + (call_ratio_pct - 50)))
+        elif price < gamma_flip and call_ratio_pct <= 48:
             signal_type = "PUT"
-            reason_text = f"السعر اللحظي (${price:.2f}) أدنى من مستوى الفليب Gamma Flip (${gamma_flip:.2f}) مما يعزز الضغط البيعي ويتجه نحو مستويات الدعم."
-
+            confidence_score = min(98, int(60 + abs(dist_from_flip)*5 + (50 - call_ratio_pct)))
+        
         if target_expiration and signal_type != "NEUTRAL":
             opt = stock.option_chain(target_expiration)
             chain = opt.calls if signal_type == "CALL" else opt.puts
-            chain['Trade_Value'] = chain['volume'] * chain['lastPrice'] * 100
+            chain['Liquidity_Score'] = chain['volume'].fillna(0) * chain['openInterest'].fillna(0)
             
-            valid = chain[(chain['lastPrice'] <= max_contract_price) & (chain['lastPrice'] >= 0.20)]
+            # فلترة العقود المتاحة حسب الحد الأقصى للسعر والميزانية
+            valid = chain[(chain['lastPrice'] <= max_contract_price) & (chain['lastPrice'] >= 0.15)]
             
-            selected_contract = None
             if not valid.empty:
-                selected_contract = valid.sort_values('Trade_Value', ascending=False).iloc[0]
-
-            if selected_contract is not None:
+                selected_contract = valid.sort_values('Liquidity_Score', ascending=False).iloc[0]
                 strike_price = selected_contract['strike']
                 contract_price = selected_contract['lastPrice']
-                c_type = "CALL" if signal_type == "CALL" else "PUT"
+                single_contract_cost = contract_price * 100
                 
-                target_1 = contract_price * 1.25
-                target_2 = contract_price * 1.50
-                stop_loss = contract_price * 0.85
-                
+                # حساب حجم المركز المناسب للمحفظة
+                recommended_contracts = max(1, int(max_trade_budget // single_contract_cost))
+                total_position_cost = recommended_contracts * single_contract_cost
+
+                # الأهداف الذكية
+                target_1 = contract_price * 1.20   # هدف خاطف (+20%)
+                target_2 = contract_price * 1.45   # هدف أساسي (+45%)
+                target_3 = contract_price * 2.00   # هدف امتدادي (+100%)
+                stop_loss = contract_price * 0.82  # وقف خسارة قاطع (-18%)
+
+                card_style = "trade-card-call" if signal_type == "CALL" else "trade-card-put"
+                badge_color = "#2ea043" if signal_type == "CALL" else "#da3633"
+
                 st.markdown(f"""
-                <div class='recommendation-box'>
-                    <h3>🏆 فرصة فورية (إشارة دخول) - {ticker_symbol} - ${strike_price:g} {c_type}</h3>
-                    <p><b>تاريخ الانتهاء:</b> {target_expiration} | <b>سعر العقد:</b> <span style='color:#f0883e; font-size:1.3em;'>${contract_price:.2f}</span> (${contract_price*100:.0f} لكل عقد)</p>
-                    <p style='background-color: #161b22; padding: 10px; border-radius: 8px; border-right: 4px solid #58a6ff;'>
-                        📌 <b>سبب اختيار التوصية:</b> {reason_text}
-                    </p>
-                    <hr style='border-color: #30363d;'>
-                    <div style='display: flex; justify-content: space-around; text-align: center;'>
-                        <div><h4>🎯 الهدف الأول (+25%)</h4><h3 style='color: #2ea043;'>${target_1:.2f}</h3></div>
-                        <div><h4>🚀 الهدف الثاني (+50%)</h4><h3 style='color: #58a6ff;'>${target_2:.2f}</h3></div>
-                        <div><h4>🛑 وقف الخسارة (-15%)</h4><h3 style='color: #da3633;'>${stop_loss:.2f}</h3></div>
+                <div class='{card_style}'>
+                    <div style='display:flex; justify-content:space-between; align-items:center;'>
+                        <span style='background-color:{badge_color}; color:#fff; padding:6px 16px; border-radius:20px; font-weight:bold; font-size:1.1em;'>
+                            إشارة دخول قوية 🔥 {signal_type}
+                        </span>
+                        <span style='color:#e1e4e8; font-size:1.1em;'>مؤشر ثقة الخوارزمية: <b style='color:#f0883e;'>{confidence_score}%</b></span>
+                    </div>
+                    
+                    <h2 style='margin-top:15px; font-size:2.2em;'>{ticker_symbol} - Strike ${strike_price:g} {signal_type}</h2>
+                    <p style='font-size:1.1em;'>📅 <b>تاريخ الانتهاء:</b> {target_expiration} | <b>سعر العقد المفرد:</b> <span style='color:#f0883e; font-weight:bold; font-size:1.3em;'>${contract_price:.2f}</span></p>
+
+                    <div style='background-color:rgba(0,0,0,0.3); padding:15px; border-radius:12px; margin:15px 0;'>
+                        <h4 style='margin:0 0 10px 0; color:#58a6ff;'>🧮 حاسبة إدارة المخاطر وتوزيع المركز:</h4>
+                        <p style='margin:3px 0;'>• <b>عدد العقود الموصى بها:</b> <span style='color:#ffffff; font-size:1.2em; font-weight:bold;'>{recommended_contracts} عقود</span></p>
+                        <p style='margin:3px 0;'>• <b>إجمالي التكلفة للمحفظة:</b> <span style='color:#ffffff; font-weight:bold;'>${total_position_cost:.2f}</span> (تأخذ { (total_position_cost/portfolio_size)*100:.1f}% من رأس مالك)</p>
+                    </div>
+
+                    <div style='display: grid; grid-template-columns: repeat(4, 1fr); gap:10px; text-align:center; margin-top:20px;'>
+                        <div style='background:rgba(255,255,255,0.05); padding:10px; border-radius:10px;'>
+                            <small style='color:#8b949e;'>🎯 هدف خاطف (+20%)</small>
+                            <h3 style='color:#2ea043; margin:5px 0;'>${target_1:.2f}</h3>
+                        </div>
+                        <div style='background:rgba(255,255,255,0.05); padding:10px; border-radius:10px;'>
+                            <small style='color:#8b949e;'>🚀 هدف أساسي (+45%)</small>
+                            <h3 style='color:#388bfd; margin:5px 0;'>${target_2:.2f}</h3>
+                        </div>
+                        <div style='background:rgba(255,255,255,0.05); padding:10px; border-radius:10px;'>
+                            <small style='color:#8b949e;'>💎 هدف امتدادي (+100%)</small>
+                            <h3 style='color:#a371f7; margin:5px 0;'>${target_3:.2f}</h3>
+                        </div>
+                        <div style='background:rgba(255,255,255,0.05); padding:10px; border-radius:10px;'>
+                            <small style='color:#8b949e;'>🛑 وقف الخسارة (-18%)</small>
+                            <h3 style='color:#da3633; margin:5px 0;'>${stop_loss:.2f}</h3>
+                        </div>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
 
-                if st.button("💖 إضافة الفرصة إلى جدول المتابعة"):
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                if st.button("💖 إضافة الصفقة إلى قائمة المتابعة والصفقات الحية", use_container_width=True):
                     log_df = pd.read_csv(LOG_FILE)
                     new_row = {
                         "Date": datetime.now().strftime('%m-%d %H:%M'),
                         "Ticker": ticker_symbol,
-                        "Type": c_type,
+                        "Type": signal_type,
                         "Strike": strike_price,
                         "Expiration": target_expiration,
-                        "Entry_Contract_Price": contract_price,
+                        "Entry_Price": contract_price,
                         "Target_1": target_1,
                         "Target_2": target_2,
-                        "Stop_Loss": stop_loss
+                        "Target_3": target_3,
+                        "Stop_Loss": stop_loss,
+                        "Contracts": recommended_contracts
                     }
                     log_df = pd.concat([log_df, pd.DataFrame([new_row])], ignore_index=True)
                     log_df.to_csv(LOG_FILE, index=False)
-                    st.success("تم إضافة العقد بنجاح! 💖")
+                    st.success("تم تثبيت الصفقة في القائمة المباشرة! 💖")
+            else:
+                st.warning("⚠️ لا توجد عقود تطابق شروط السعر أو السيولة في التاريخ المعتمد حالياً.")
         else:
             st.markdown("""
-            <div class='wait-box'>
-                <h3>🛑 قرار المحفظة: امسك الكاش (Wait & Protect Capital)</h3>
-                <p>السهم في نطاق محايد حول Gamma Flip. يفضل الانتظار للحفاظ على رأس المال.</p>
+            <div class='wait-card'>
+                <h2 style='color:#d29922; margin:0;'>🛑 قرار الخوارزمية: الانتظار وتجميد التداول (Hold Cash)</h2>
+                <p style='font-size:1.1em; margin-top:10px;'>السعر حالياً يدور في منطقة تذبذب ضيقة بالقرب من Gamma Flip ولا توجد غلبة واضحة للشرائيين أو البائعين. لحماية رأس المال، نوصي بعدم الدخول الآن.</p>
             </div>
             """, unsafe_allow_html=True)
 
         st.divider()
 
-        # 9. جدول المتابعة
-        st.subheader("💖 صفقات المتابعة والمفضلة")
+        # 8. جدول الصفقات المفتوحة والمتابعة الحية
+        st.markdown("### 📋 الصفقات المفتوحة والمتابعة الحية")
         log_df = pd.read_csv(LOG_FILE)
         
         if not log_df.empty:
@@ -411,8 +283,9 @@ if ticker_symbol:
                 t_strike = float(row['Strike'])
                 t_type = row['Type']
                 t_exp = row['Expiration']
-                entry_price = float(row['Entry_Contract_Price'])
-                t1, t2 = float(row['Target_1']), float(row['Target_2'])
+                entry_p = float(row['Entry_Price'])
+                t1, t2, t3 = float(row['Target_1']), float(row['Target_2']), float(row['Target_3'])
+                num_c = row.get('Contracts', 1)
                 
                 try:
                     s_ticker = yf.Ticker(t_ticker)
@@ -422,38 +295,46 @@ if ticker_symbol:
                     
                     if not matched.empty:
                         curr_p = float(matched['lastPrice'].values[0])
-                        roi = ((curr_p - entry_price) / entry_price) * 100
+                        roi = ((curr_p - entry_p) / entry_p) * 100
+                        pnl_usd = (curr_p - entry_p) * 100 * float(num_c)
                         
-                        if curr_p >= t2: achievement = "🚀 الهدف 2 (+50%)"
-                        elif curr_p >= t1: achievement = "🎯 الهدف 1 (+25%)"
-                        elif curr_p < entry_price * 0.85: achievement = "🛑 ضرب وقف الخسارة"
-                        else: achievement = "⏳ قيد التداول"
+                        if curr_p >= t3: status = "💎 تم تحضير +100%"
+                        elif curr_p >= t2: status = "🚀 تحقق الهدف 2"
+                        elif curr_p >= t1: status = "🎯 تحقق الهدف 1"
+                        elif curr_p <= float(row['Stop_Loss']): status = "🛑 ضرب وقف الخسارة"
+                        else: status = "⏳ قيد التداول"
                     else:
-                        curr_p, roi, achievement = "منتهي", 0.0, "⚪ انتهى العقد"
+                        curr_p, roi, pnl_usd, status = entry_p, 0.0, 0.0, "⚪ انتهى العقد"
                 except:
-                    curr_p, roi, achievement = entry_price, 0.0, "🔄 جاري التحديث"
+                    curr_p, roi, pnl_usd, status = entry_p, 0.0, 0.0, "🔄 تحديث"
 
                 rows_data.append({
                     "#": idx + 1,
-                    "الوقت": row['Date'],
-                    "العقد": f"{t_ticker} ${t_strike:g} {t_type}",
+                    "التاريخ": row['Date'],
+                    "الصفقة": f"{t_ticker} ${t_strike:g} {t_type}",
                     "الانتهاء": t_exp,
-                    "سعر الدخول": f"${entry_price:.2f}",
-                    "السعر الحالي": f"${curr_p:.2f}" if isinstance(curr_p, float) else curr_p,
-                    "الربح/الخسارة": f"{roi:+.1f}%",
-                    "الحالة": achievement
+                    "العقود": num_c,
+                    "سعر الدخول": f"${entry_p:.2f}",
+                    "السعر اللحظي": f"${curr_p:.2f}" if isinstance(curr_p, float) else curr_p,
+                    "العائد (%)": f"{roi:+.1f}%",
+                    "الربح/الخسارة ($)": f"${pnl_usd:+.2f}",
+                    "الحالة": status
                 })
             
             df_track = pd.DataFrame(rows_data)
             st.dataframe(df_track, hide_index=True, use_container_width=True)
             
-            remove_num = st.selectbox("اختر رقم الصفقة لحذفها:", options=df_track["#"].tolist())
-            if st.button("💔 إزالة من المفضلة"):
-                log_df = log_df.drop(remove_num - 1).reset_index(drop=True)
-                log_df.to_csv(LOG_FILE, index=False)
-                st.rerun()
+            col_del1, col_del2 = st.columns([3, 1])
+            with col_del1:
+                remove_num = st.selectbox("اختر رقم الصفقة لحذفها عند الإغلاق:", options=df_track["#"].tolist())
+            with col_del2:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("🗑️ إغلاق وحذف الصفقة"):
+                    log_df = log_df.drop(remove_num - 1).reset_index(drop=True)
+                    log_df.to_csv(LOG_FILE, index=False)
+                    st.rerun()
         else:
-            st.info("لا توجد صفقات في المتابعة حالياً.")
+            st.info("لا توجد صفقات مفتوحة حالياً في قائمة المتابعة.")
 
     except Exception as e:
-        st.error(f"حدث خطأ أثناء تحميل البيانات: {e}")
+        st.error(f"حدث خطأ أثناء الاتصال بالخادم: {e}")
