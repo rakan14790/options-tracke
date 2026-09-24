@@ -46,6 +46,18 @@ if not os.path.exists(LOG_FILE):
     ])
     df_empty.to_csv(LOG_FILE, index=False)
 
+# دالة لتنسيق أرقام القاما إلى الملايين والمليارات
+def format_gex_val(val):
+    abs_val = abs(val)
+    if abs_val >= 1e9:
+        return f"{val/1e9:.2f}B"
+    elif abs_val >= 1e6:
+        return f"{val/1e6:.1f}M"
+    elif abs_val >= 1e3:
+        return f"{val/1e3:.0f}K"
+    else:
+        return f"{val:.0f}"
+
 # 2. القائمة الجانبية وتصفية تواريخ الانتهاء
 st.sidebar.header("🎯 إعدادات السهم وتصفية العقود")
 ticker_symbol = st.sidebar.text_input("رمز السهم", value="NVDA").upper()
@@ -62,36 +74,28 @@ if ticker_symbol:
         
         all_expirations = stock.options
 
-        # قائمة خيارات تصفية التواريخ
+        # قائمة خيارات تصفية التواريخ المعدلة
         exp_mode = st.sidebar.radio(
             "اختر نوع القاما المراد عرضها:",
-            ["اليومية (أقرب انتهاء 0DTE/أسبوعي)", "تحديد انتهاء محدد (أربعاء / جمعة)", "دمج جميع التواريخ المتاحة (All Combined)"]
+            ["اليومية / أقرب انتهاء (0DTE/Weekly)", "تحديد تاريخ انتهاء محدد", "دمج جميع التواريخ المتاحة (All Combined)"]
         )
 
         selected_expirations = []
 
-        if exp_mode == "اليومية (أقرب انتهاء 0DTE/أسبوعي)":
+        if exp_mode == "اليومية / أقرب انتهاء (0DTE/Weekly)":
             if all_expirations:
                 selected_expirations = [all_expirations[0]]
         elif exp_mode == "دمج جميع التواريخ المتاحة (All Combined)":
-            selected_expirations = list(all_expirations[:6]) # دمج أول 6 تواريخ لتفادي بطء التحميل
+            selected_expirations = list(all_expirations[:8]) # دمج أول 8 تواريخ لتغطية التداولات
         else:
-            # تصفية العقود حسب يوم الأسبوع (الأربعاء = 2، الجمعة = 4)
-            weekday_choice = st.sidebar.selectbox("اختر اليوم المستهدف:", ["الجمعة فقط (Fridays)", "الأربعاء فقط (Wednesdays)"])
-            target_day = 4 if "الجمعة" in weekday_choice else 2
-            
-            for exp in all_expirations:
-                exp_dt = datetime.strptime(exp, "%Y-%m-%d")
-                if exp_dt.weekday() == target_day:
-                    selected_expirations.append(exp)
-            
-            if selected_expirations:
-                chosen_specific = st.sidebar.selectbox("اختر تاريخ الانتهاء المحدد:", selected_expirations)
-                selected_expirations = [chosen_specific]
+            # تحديد تاريخ محدد من القائمة مباشرة
+            if all_expirations:
+                chosen_date = st.sidebar.selectbox("اختر تاريخ الانتهاء المطلوب:", all_expirations)
+                selected_expirations = [chosen_date]
 
         max_contract_price = st.sidebar.number_input("الحد الأقصى لسعر العقد ($)", value=1.50, step=0.10)
 
-        # 3. تجميع وحساب القاما الصافية Net GEX
+        # 3. تجميع وحساب القاما الصافية Net GEX مع الانحراف والتفتيت
         combined_calls = []
         combined_puts = []
 
@@ -110,18 +114,18 @@ if ticker_symbol:
             calls_df = pd.concat(combined_calls, ignore_index=True)
             puts_df = pd.concat(combined_puts, ignore_index=True)
 
-            calls_df['Call_GEX'] = calls_df['volume'].fillna(0) * calls_df['impliedVolatility'].fillna(0.2) * price * 0.01
-            puts_df['Put_GEX'] = -puts_df['volume'].fillna(0) * puts_df['impliedVolatility'].fillna(0.2) * price * 0.01
+            # معادلة دقيقة للقاما الموجهة
+            calls_df['Call_GEX'] = calls_df['openInterest'].fillna(0) * calls_df['impliedVolatility'].fillna(0.2) * (price**2) * 0.01
+            puts_df['Put_GEX'] = -puts_df['openInterest'].fillna(0) * puts_df['impliedVolatility'].fillna(0.2) * (price**2) * 0.01
 
-            # تجميع القاما حسب السترايك
             gex_calls = calls_df.groupby('strike')['Call_GEX'].sum().reset_index()
             gex_puts = puts_df.groupby('strike')['Put_GEX'].sum().reset_index()
 
             gex_merged = pd.merge(gex_calls, gex_puts, on='strike', how='outer').fillna(0)
             gex_merged['Net_GEX'] = gex_merged['Call_GEX'] + gex_merged['Put_GEX']
 
-            # تصفية السترايكات القريبة من السعر الحالي (±10%)
-            gex_near = gex_merged[(gex_merged['strike'] >= price * 0.90) & (gex_merged['strike'] <= price * 1.10)].sort_values('strike')
+            # تصفية السترايكات القريبة من سعر السهم (±8%)
+            gex_near = gex_merged[(gex_merged['strike'] >= price * 0.92) & (gex_merged['strike'] <= price * 1.08)].sort_values('strike')
 
             call_wall = gex_near.sort_values('Call_GEX', ascending=False).iloc[0]['strike'] if not gex_near.empty else price
             put_wall = gex_near.sort_values('Put_GEX', ascending=True).iloc[0]['strike'] if not gex_near.empty else price
@@ -130,7 +134,7 @@ if ticker_symbol:
             call_wall, put_wall, gamma_flip = price, price, price
             gex_near = pd.DataFrame()
 
-        # 4. عرض البطاقات الرقمية
+        # 4. عرض البطاقات الرقمية الرئيسية
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.markdown(f"<div class='metric-card'><h4>السعر اللحظي (Spot Price)</h4><h2>${price:.2f}</h2><p>{'🟢' if change>=0 else '🔴'} {change:+.2f} ({pct_change:+.2f}%)</p></div>", unsafe_allow_html=True)
@@ -145,23 +149,35 @@ if ticker_symbol:
 
         # 5. عرض شارت Net GEX المبسط والواضح
         exp_label = ", ".join(selected_expirations) if len(selected_expirations) <= 2 else f"مدمج ({len(selected_expirations)} تواريخ)"
-        st.subheader(f"📊 شارت القاما الصافية المبسط (Net GEX) - العقود المستهدفة: [{exp_label}]")
+        st.subheader(f"📊 شارت القاما الصافية (Net GEX) - الانتهاء: [{exp_label}]")
 
         if not gex_near.empty:
-            fig, ax = plt.subplots(figsize=(10, 5))
+            fig, ax = plt.subplots(figsize=(10, 6))
             fig.patch.set_facecolor('#080a0f')
             ax.set_facecolor('#0e121b')
 
             colors = ['#2ea043' if val >= 0 else '#da3633' for val in gex_near['Net_GEX']]
-            ax.barh(gex_near['strike'], gex_near['Net_GEX'], color=colors, height=0.7)
+            bars = ax.barh(gex_near['strike'], gex_near['Net_GEX'], color=colors, height=0.6)
+
+            # إضافة قيم القاما بالنص على الأشرطة بوضوح (M / B / K)
+            for bar, val in zip(bars, gex_near['Net_GEX']):
+                if abs(val) > 0:
+                    text_x = bar.get_width()
+                    ha = 'left' if text_x >= 0 else 'right'
+                    offset = (gex_near['Net_GEX'].abs().max() * 0.01) if text_x >= 0 else -(gex_near['Net_GEX'].abs().max() * 0.01)
+                    ax.text(text_x + offset, bar.get_y() + bar.get_height()/2, format_gex_val(val),
+                            va='center', ha=ha, color='#ffffff', fontsize=8, fontweight='bold')
 
             ax.axhline(price, color='#38d430', linestyle='--', linewidth=2, label=f'السعر الحالي (${price:.2f})')
             ax.axhline(gamma_flip, color='#a371f7', linestyle=':', linewidth=2, label=f'Gamma Flip (${gamma_flip:.2f})')
 
             ax.set_ylabel('سعر الإضراب Strike ($)', color='#e1e4e8', fontsize=11)
-            ax.set_xlabel('صافي القاما (Net GEX Magnitude)', color='#e1e4e8', fontsize=11)
+            ax.set_xlabel('صافي القاما Net GEX ($)', color='#e1e4e8', fontsize=11)
             ax.tick_params(colors='#e1e4e8')
             ax.grid(color='#1b2230', linestyle='--', alpha=0.5)
+            
+            # تغيير قيم المحور الأفقي لتعرض بصيغة M/B
+            ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: format_gex_val(x)))
             ax.legend(facecolor='#0e121b', edgecolor='#232a3b', labelcolor='#e1e4e8')
 
             st.pyplot(fig)
