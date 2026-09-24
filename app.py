@@ -42,7 +42,7 @@ st.title("🛡️ راصد التداول الصارم (إدارة محفظة ا
 LOG_FILE = "favorites_log.csv"
 if not os.path.exists(LOG_FILE):
     df_empty = pd.DataFrame(columns=[
-        "ID", "Date", "Ticker", "Type", "Strike", "Expiration", 
+        "Date", "Ticker", "Type", "Strike", "Expiration", 
         "Entry_Contract_Price", "Target_1", "Target_2", "Stop_Loss"
     ])
     df_empty.to_csv(LOG_FILE, index=False)
@@ -102,7 +102,7 @@ if ticker_symbol:
 
         st.divider()
 
-        # 2. قسم التوصية عالية الدقة (High-Probability Signal)
+        # 2. قسم التوصية عالية الدقة
         st.subheader("🎯 التوصية عالية التأكيد (مخاطرة منخفضة)")
         expirations = stock.options
         
@@ -149,9 +149,7 @@ if ticker_symbol:
 
                 if st.button("💖 إضافة التوصية فوراً إلى قائمة المتابعة"):
                     log_df = pd.read_csv(LOG_FILE)
-                    new_id = int(datetime.now().timestamp())
                     new_row = {
-                        "ID": new_id,
                         "Date": datetime.now().strftime('%m-%d %H:%M'),
                         "Ticker": ticker_symbol,
                         "Type": c_type,
@@ -177,8 +175,8 @@ if ticker_symbol:
 
         st.divider()
 
-        # 3. جدول الصفقات المفضلة والمتابعة (مع زر الإزالة 💔)
-        st.subheader("💖 صفقات المتابعة والمفضلة (حفظ وحذف بنقرة)")
+        # 3. جدول صفقات المتابعة بأسلوب الترقيم البسيط #1, #2...
+        st.subheader("💖 صفقات المتابعة والمفضلة (ترقيم مبسط وإزالة فوريّة)")
         log_df = pd.read_csv(LOG_FILE)
         
         if not log_df.empty:
@@ -202,11 +200,11 @@ if ticker_symbol:
                         roi = ((curr_p - entry_price) / entry_price) * 100
                         
                         if curr_p >= t2:
-                            achievement = "🚀 حقق الهدف الثاني (+50%)"
+                            achievement = "🚀 الهدف 2 (+50%)"
                         elif curr_p >= t1:
-                            achievement = "🎯 حقق الهدف الأول (+25%)"
+                            achievement = "🎯 الهدف 1 (+25%)"
                         elif curr_p < entry_price * 0.85:
-                            achievement = "🛑 ضرب وقف الخسارة"
+                            achievement = "🛑 وقف الخسارة"
                         else:
                             achievement = "⏳ قيد التداول"
                     else:
@@ -219,7 +217,7 @@ if ticker_symbol:
                     achievement = "🔄 جاري التحديث"
 
                 rows_data.append({
-                    "المعرف": int(row['ID']) if 'ID' in row and not pd.isna(row['ID']) else idx,
+                    "#": idx + 1,  # ترقيم تبسيطي يبدأ من 1
                     "الوقت": row['Date'],
                     "الرمز والعقد": f"{t_ticker} ${t_strike:g} {t_type}",
                     "الانتهاء": t_exp,
@@ -234,19 +232,20 @@ if ticker_symbol:
             df_track = pd.DataFrame(rows_data)
             st.dataframe(df_track, use_container_width=True)
             
-            # زر إزالة الصفقة من المفضلة
-            remove_id = st.selectbox("اختر صفقة لإزالتها من المتابعة:", options=df_track["المعرف"].tolist())
+            # قائمة اختيار بسيطة برقم الصفقة فقط (#1, #2...)
+            remove_num = st.selectbox("اختر رقم الصفقة لإزالتها من القائمة:", options=df_track["#"].tolist())
             if st.button("💔 إزالة من المفضلة"):
-                log_df = log_df[log_df['ID'] != remove_id]
+                # حذف السطر بناءً على الـ index الفعلي (رقم الصفقة - 1)
+                log_df = log_df.drop(remove_num - 1).reset_index(drop=True)
                 log_df.to_csv(LOG_FILE, index=False)
                 st.rerun()
         else:
-            st.info("لا توجد صفقات في المتابعة حالياً. اضغط على 💖 في التوصية لإضافتها هنا.")
+            st.info("لا توجد صفقات في المتابعة حالياً.")
 
         st.divider()
 
-        # 4. جدول تدفق صفقات الحيتان (حول السعر اللحظي فقط)
-        st.subheader("🐋 رصد صفقات الحيتان (السترايكات القريبة وسعر العقد اللحظي)")
+        # 4. جدول تدفق صفقات الحيتان (مع اختصار الفوليوم مثل 52.3K)
+        st.subheader("🐋 رصد صفقات الحيتان (فوليوم مختصر وسعر العقد اللحظي)")
         selected_exp = st.selectbox("تاريخ عقد الحيتان:", options=expirations[:3])
         opt_data = stock.option_chain(selected_exp)
         
@@ -255,21 +254,29 @@ if ticker_symbol:
         df_all = pd.concat([calls_df, puts_df])
         df_all['Trade_Value'] = df_all['volume'] * df_all['lastPrice'] * 100
         
-        # تصفية السترايكات القريبة من سعر السهم الحالي بنسبة ±5% فقط
+        # تصفية السترايكات القريبة من سعر السهم الحالي بنسبة ±5%
         lower_bound, upper_bound = price * 0.95, price * 1.05
         whales = df_all[(df_all['strike'] >= lower_bound) & (df_all['strike'] <= upper_bound)].copy()
         whales = whales[whales['Trade_Value'] >= whale_filter].copy()
         
         if not whales.empty:
+            # دالة اختصار أرقام الفوليوم (K)
+            def format_vol(v):
+                if pd.isna(v): return "0"
+                if v >= 1000:
+                    return f"{v/1000:.1f}K"
+                return str(int(v))
+
             df_display = pd.DataFrame({
                 'النوع': whales['Type'],
                 'السترايك': whales['strike'].apply(lambda x: f"${x:g}"),
+                'تاريخ العقد': selected_exp,
+                'عدد العقود (Volume)': whales['volume'].apply(format_vol),  # الفوليوم المختصر
                 'سعر العقد الحالي': whales['lastPrice'].apply(lambda x: f"${x:.2f}"),
                 'العرض (Ask)': whales['ask'].apply(lambda x: f"${x:.2f}"),
                 'الطلب (Bid)': whales['bid'].apply(lambda x: f"${x:.2f}"),
-                'الحجم (Volume)': whales['volume'].fillna(0).astype(int),
                 'إجمالي قيمة الصفقة': whales['Trade_Value'].apply(lambda x: f"${x/1000:.1f}K" if x < 1000000 else f"${x/1000000:.2f}M")
-            }).sort_values('الحجم (Volume)', ascending=False)
+            }).sort_values('سعر العقد الحالي', ascending=False)
 
             st.dataframe(df_display, use_container_width=True, height=420)
         else:
