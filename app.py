@@ -7,7 +7,7 @@ from datetime import datetime
 import os
 
 # 1. إعدادات الصفحة والستايل
-st.set_page_config(page_title="NVDA Institutional Trading Hub", layout="wide")
+st.set_page_config(page_title="TSLA / NVDA Institutional GEX Hub", layout="wide")
 
 st.markdown("""
     <style>
@@ -59,7 +59,7 @@ def format_gex_val(val):
 
 # 2. القائمة الجانبية
 st.sidebar.header("🎯 إعدادات السهم وتصفية العقود")
-ticker_symbol = st.sidebar.text_input("رمز السهم", value="NVDA").upper()
+ticker_symbol = st.sidebar.text_input("رمز السهم", value="TSLA").upper()
 
 if ticker_symbol:
     try:
@@ -88,49 +88,57 @@ if ticker_symbol:
 
         max_contract_price = st.sidebar.number_input("الحد الأقصى لسعر العقد ($)", value=1.50, step=0.10)
 
-        # 3. جلب وحساب القاما والسيولة
+        # 3. جلب وحساب القاما الدقيقة المعتمدة على Open Interest
         if target_expiration:
             opt = stock.option_chain(target_expiration)
             c_df, p_df = opt.calls.copy(), opt.puts.copy()
 
-            # حساب الأحجام والتدفقات
             c_vol_total = c_df['volume'].fillna(0).sum()
             p_vol_total = p_df['volume'].fillna(0).sum()
             total_vol = c_vol_total + p_vol_total
-            
             call_ratio_pct = (c_vol_total / total_vol * 100) if total_vol > 0 else 50.0
 
-            # حساب القاما الصافية
-            c_volume = c_df['volume'].fillna(0)
-            p_volume = p_df['volume'].fillna(0)
-            if c_volume.sum() == 0 and 'openInterest' in c_df.columns:
-                c_volume = c_df['openInterest'].fillna(0)
-            if p_volume.sum() == 0 and 'openInterest' in p_df.columns:
-                p_volume = p_df['openInterest'].fillna(0)
+            # استخدام Open Interest بشكل أساسي
+            c_oi = c_df['openInterest'].fillna(0)
+            p_oi = p_df['openInterest'].fillna(0)
 
-            c_df['Call_GEX'] = c_volume * c_df['impliedVolatility'].fillna(0.2) * (price**2) * 0.001
-            p_df['Put_GEX'] = -p_volume * p_df['impliedVolatility'].fillna(0.2) * (price**2) * 0.001
+            # Fallback للفوليوم إذا كانت OI فارغة
+            if c_oi.sum() == 0: c_oi = c_df['volume'].fillna(0)
+            if p_oi.sum() == 0: p_oi = p_df['volume'].fillna(0)
+
+            # حساب القاما الاحترافي: (Price^2 * IV * OI * 0.01)
+            c_df['Call_GEX'] = c_oi * c_df['impliedVolatility'].fillna(0.2) * (price**2) * 0.01
+            p_df['Put_GEX'] = -p_oi * p_df['impliedVolatility'].fillna(0.2) * (price**2) * 0.01
 
             gex_calls = c_df.groupby('strike')['Call_GEX'].sum().reset_index()
             gex_puts = p_df.groupby('strike')['Put_GEX'].sum().reset_index()
 
             gex_merged = pd.merge(gex_calls, gex_puts, on='strike', how='outer').fillna(0)
             gex_merged['Net_GEX'] = gex_merged['Call_GEX'] + gex_merged['Put_GEX']
+            gex_merged = gex_merged.sort_values('strike').reset_index(drop=True)
 
-            gex_near = gex_merged[(gex_merged['strike'] >= price * 0.90) & (gex_merged['strike'] <= price * 1.10)].sort_values('strike')
+            # نطاق السترايكات القريبة من السعر
+            gex_near = gex_merged[(gex_merged['strike'] >= price * 0.85) & (gex_merged['strike'] <= price * 1.15)].copy()
 
             if not gex_near.empty:
                 call_wall = gex_near.sort_values('Call_GEX', ascending=False).iloc[0]['strike']
                 put_wall = gex_near.sort_values('Put_GEX', ascending=True).iloc[0]['strike']
-                gamma_flip = (call_wall + put_wall) / 2
+
+                # حساب Gamma Flip الحقيقي (Zero Gamma Level)
+                gex_near['Cum_GEX'] = gex_near['Net_GEX'].cumsum()
+                zero_cross = gex_near[gex_near['Net_GEX'] >= 0]
+                if not zero_cross.empty:
+                    gamma_flip = zero_cross.iloc[0]['strike']
+                else:
+                    gamma_flip = (call_wall + put_wall) / 2
             else:
                 call_wall, put_wall, gamma_flip = price, price, price
 
-            # تجهيز بيانات شارت عمق السيولة (Volume per Strike)
+            # بيانات الشارت الثاني (عمق السيولة)
             v_calls = c_df.groupby('strike')['volume'].sum().reset_index().rename(columns={'volume': 'Call_Vol'})
             v_puts = p_df.groupby('strike')['volume'].sum().reset_index().rename(columns={'volume': 'Put_Vol'})
             vol_merged = pd.merge(v_calls, v_puts, on='strike', how='outer').fillna(0)
-            vol_near = vol_merged[(vol_merged['strike'] >= price * 0.92) & (vol_merged['strike'] <= price * 1.08)].sort_values('strike')
+            vol_near = vol_merged[(vol_merged['strike'] >= price * 0.90) & (vol_merged['strike'] <= price * 1.10)].sort_values('strike')
 
         else:
             call_wall, put_wall, gamma_flip = price, price, price
@@ -138,12 +146,12 @@ if ticker_symbol:
             gex_near = pd.DataFrame()
             vol_near = pd.DataFrame()
 
-        # 4. بطاقات القياس اللحظية + خلل التدفق
+        # 4. بطاقات القياس اللحظية
         col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
             st.markdown(f"<div class='metric-card'><h4>السعر اللحظي</h4><h2>${price:.2f}</h2><p>{'🟢' if change>=0 else '🔴'} {change:+.2f} ({pct_change:+.2f}%)</p></div>", unsafe_allow_html=True)
         with col2:
-            st.markdown(f"<div class='metric-card'><h4>مستوى الفليب</h4><h2 style='color:#a371f7;'>${gamma_flip:.2f}</h2><p>نقطة تحول الزخم</p></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='metric-card'><h4>مستوى الفليب</h4><h2 style='color:#a371f7;'>${gamma_flip:.2f}</h2><p>Zero Gamma Flip</p></div>", unsafe_allow_html=True)
         with col3:
             st.markdown(f"<div class='metric-card'><h4>(Call Wall) جدار القاما</h4><h2 style='color:#2ea043;'>${call_wall:g}</h2><p>هدف المقاومة/الرصد</p></div>", unsafe_allow_html=True)
         with col4:
@@ -154,11 +162,11 @@ if ticker_symbol:
 
         st.divider()
 
-        # 5. عرض شارت Net GEX
+        # 5. عرض شارت Net GEX الصحيح
         st.subheader(f"📊 شارت القاما الصافية (Net GEX) - الانتهاء: [{target_expiration}]")
 
         if not gex_near.empty and gex_near['Net_GEX'].abs().sum() > 0:
-            fig, ax = plt.subplots(figsize=(10, 5))
+            fig, ax = plt.subplots(figsize=(10, 5.5))
             fig.patch.set_facecolor('#080a0f')
             ax.set_facecolor('#0e121b')
 
@@ -190,7 +198,7 @@ if ticker_symbol:
 
         st.divider()
 
-        # 6. شارت عمق السيولة والفوليوم بروفايل المباشر
+        # 6. شارت عمق السيولة
         st.subheader(f"📊 عمق السيولة والفوليوم بروفايل ({ticker_symbol}) المباشر")
         if not vol_near.empty:
             fig_vol, ax_v = plt.subplots(figsize=(10, 5))
