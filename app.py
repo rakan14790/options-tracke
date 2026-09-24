@@ -62,7 +62,6 @@ st.markdown("""
         min-width: 90px;
     }
 
-    /* تحسين التصميم للشاشات الصغيرة والجوالات */
     @media (max-width: 768px) {
         .gold-header { font-size: 1.3rem; }
         .hero-flex { flex-direction: column !important; align-items: flex-start !important; gap: 12px; }
@@ -72,7 +71,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 2. إدارة ملف السجل وتفادي KeyError تلقائياً
+# 2. إدارة ملف السجل وتفادي KeyError
 LOG_FILE = "favorites_log.csv"
 REQUIRED_COLUMNS = [
     "Date", "Ticker", "Type", "Strike", "Expiration", 
@@ -86,7 +85,6 @@ def load_favorites():
         return df
     try:
         df = pd.read_csv(LOG_FILE)
-        # التحقق من وجود جميع الأعمدة المطلوبة
         for col in REQUIRED_COLUMNS:
             if col not in df.columns:
                 df[col] = np.nan
@@ -96,18 +94,11 @@ def load_favorites():
         df.to_csv(LOG_FILE, index=False)
         return df
 
-# 3. الهيدر الرئيسي
+# الهيدر الرئيسي
 st.markdown("<h1 class='gold-header'>💎 ALPHA CAPITAL | المنصة الرقمية للتداول المؤسسي</h1>", unsafe_allow_html=True)
 st.caption("🚀 محرك الخوارزميات المتقدم لاقتناص العقود مرتفعة الانفجار وحماية المحفظة")
 
-# 4. القائمة الجانبية (شريط التحكم وإدارة رأس المال)
-st.sidebar.markdown("### ⚙️ إدارة الحساب ورأس المال")
-portfolio_size = st.sidebar.number_input("إجمالي رأس المال المخصص ($)", value=2000, step=250)
-risk_per_trade_pct = st.sidebar.slider("نسبة المخاطرة القصوى للصفقة (%)", min_value=5, max_value=25, value=10)
-
-max_trade_budget = portfolio_size * (risk_per_trade_pct / 100.0)
-
-st.sidebar.divider()
+# 3. إعدادات السهم الجانبية
 st.sidebar.markdown("### 🔍 تحديد السهم والمُهل")
 ticker_symbol = st.sidebar.text_input("رمز السهم (Ticker)", value="NVDA").strip().upper()
 
@@ -122,15 +113,9 @@ if ticker_symbol:
         pct_change = (change / prev_close) * 100
         
         all_expirations = stock.options
+        target_expiration = st.sidebar.selectbox("📅 اختر تاريخ انتهاء العقد:", all_expirations) if all_expirations else None
 
-        if all_expirations:
-            target_expiration = st.sidebar.selectbox("📅 اختر تاريخ انتهاء العقد:", all_expirations)
-        else:
-            target_expiration = None
-
-        max_contract_price = st.sidebar.number_input("أقصى سعر للعقد المفرد ($)", value=2.00, step=0.10)
-
-        # 5. تحليل السيولة وصافي القاما (GEX)
+        # تحليل القاما (GEX)
         if target_expiration:
             opt = stock.option_chain(target_expiration)
             c_df, p_df = opt.calls.copy(), opt.puts.copy()
@@ -167,7 +152,7 @@ if ticker_symbol:
             call_wall, put_wall, gamma_flip = price, price, price
             call_ratio_pct = 50.0
 
-        # 6. لوحة مؤشرات الأداء الحية (متجاوبة مع الجوال)
+        # عرض الأسعار ومستويات القاما
         st.markdown(f"""
         <div class='hero-card'>
             <div class='hero-flex' style='display: flex; justify-content: space-between; align-items: center;'>
@@ -188,10 +173,9 @@ if ticker_symbol:
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # 7. التقييم الخوارزمي والتوصية الذكية
+        # التقييم الخوارزمي
         signal_type = "NEUTRAL"
         confidence_score = 0
-
         dist_from_flip = ((price - gamma_flip) / gamma_flip) * 100
 
         if price > gamma_flip and call_ratio_pct >= 52:
@@ -206,21 +190,16 @@ if ticker_symbol:
             chain = opt.calls if signal_type == "CALL" else opt.puts
             chain['Liquidity_Score'] = chain['volume'].fillna(0) * chain['openInterest'].fillna(0)
             
-            valid = chain[(chain['lastPrice'] <= max_contract_price) & (chain['lastPrice'] >= 0.15)]
-            
+            valid = chain[(chain['lastPrice'] >= 0.15)]
             if not valid.empty:
                 selected_contract = valid.sort_values('Liquidity_Score', ascending=False).iloc[0]
                 strike_price = selected_contract['strike']
                 contract_price = selected_contract['lastPrice']
-                single_contract_cost = contract_price * 100
-                
-                recommended_contracts = max(1, int(max_trade_budget // single_contract_cost))
-                total_position_cost = recommended_contracts * single_contract_cost
 
-                target_1 = contract_price * 1.20   # (+20%)
-                target_2 = contract_price * 1.45   # (+45%)
-                target_3 = contract_price * 2.00   # (+100%)
-                stop_loss = contract_price * 0.82  # (-18%)
+                target_1 = contract_price * 1.20
+                target_2 = contract_price * 1.45
+                target_3 = contract_price * 2.00
+                stop_loss = contract_price * 0.82
 
                 card_style = "trade-card-call" if signal_type == "CALL" else "trade-card-put"
                 badge_color = "#2ea043" if signal_type == "CALL" else "#da3633"
@@ -235,15 +214,9 @@ if ticker_symbol:
                     </div>
                     
                     <h3 style='margin-top:12px; font-size:1.6em;'>{ticker_symbol} - Strike ${strike_price:g} {signal_type}</h3>
-                    <p style='font-size:0.95em;'>📅 <b>الانتهاء:</b> {target_expiration} | <b>سعر العقد:</b> <span style='color:#f0883e; font-weight:bold;'>${contract_price:.2f}</span></p>
+                    <p style='font-size:0.95em;'>📅 <b>الانتهاء:</b> {target_expiration} | <b>سعر العقد المقترح:</b> <span style='color:#f0883e; font-weight:bold;'>${contract_price:.2f}</span></p>
 
-                    <div style='background-color:rgba(0,0,0,0.3); padding:12px; border-radius:10px; margin:12px 0;'>
-                        <h5 style='margin:0 0 6px 0; color:#58a6ff;'>🧮 إدارة المركز:</h5>
-                        <p style='margin:2px 0; font-size:0.9em;'>• <b>عدد العقود:</b> <span style='color:#ffffff; font-weight:bold;'>{recommended_contracts} عقود</span></p>
-                        <p style='margin:2px 0; font-size:0.9em;'>• <b>التكلفة:</b> <span style='color:#ffffff; font-weight:bold;'>${total_position_cost:.2f}</span> ({ (total_position_cost/portfolio_size)*100:.1f}% من المحفظة)</p>
-                    </div>
-
-                    <div class='grid-targets' style='display: grid; grid-template-columns: repeat(4, 1fr); gap:8px; text-align:center;'>
+                    <div class='grid-targets' style='display: grid; grid-template-columns: repeat(4, 1fr); gap:8px; text-align:center; margin-top:12px;'>
                         <div style='background:rgba(255,255,255,0.05); padding:8px; border-radius:8px;'>
                             <small style='color:#8b949e; font-size:0.75em;'>🎯 خاطف (+20%)</small>
                             <h4 style='color:#2ea043; margin:2px 0;'>${target_1:.2f}</h4>
@@ -263,45 +236,55 @@ if ticker_symbol:
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
-
-                st.markdown("<br>", unsafe_allow_html=True)
-
-                if st.button("💖 إضافة الصفقة إلى قائمة المتابعة الحية", use_container_width=True):
-                    log_df = load_favorites()
-                    new_row = {
-                        "Date": datetime.now().strftime('%m-%d %H:%M'),
-                        "Ticker": ticker_symbol,
-                        "Type": signal_type,
-                        "Strike": strike_price,
-                        "Expiration": target_expiration,
-                        "Entry_Price": contract_price,
-                        "Target_1": target_1,
-                        "Target_2": target_2,
-                        "Target_3": target_3,
-                        "Stop_Loss": stop_loss,
-                        "Contracts": recommended_contracts
-                    }
-                    log_df = pd.concat([log_df, pd.DataFrame([new_row])], ignore_index=True)
-                    log_df.to_csv(LOG_FILE, index=False)
-                    st.success("تم تثبيت الصفقة في القائمة المباشرة! 💖")
-                    st.rerun()
-            else:
-                st.warning("⚠️ لا توجد عقود تطابق شروط السعر أو السيولة في التاريخ المحدد.")
         else:
             st.markdown("""
             <div class='wait-card'>
                 <h3 style='color:#d29922; margin:0;'>🛑 قرار الخوارزمية: الانتظار وتجميد التداول (Hold Cash)</h3>
-                <p style='font-size:0.95em; margin-top:8px;'>السعر حالياً يدور في منطقة تذبذب ضيقة بالقرب من Gamma Flip ولا توجد غلبة واضحة للشرائيين أو البائعين. لحماية رأس المال، نوصي بعدم الدخول الآن.</p>
+                <p style='font-size:0.95em; margin-top:8px;'>السعر حالياً يدور في منطقة تذبذب ضيقة بالقرب من Gamma Flip ولا توجد غلبة واضحة للشرائيين أو البائعين.</p>
             </div>
             """, unsafe_allow_html=True)
 
         st.divider()
 
-        # 8. جدول الصفقات المفتوحة والمتابعة الحية
+        # 4. إضافة وإدارة الصفقات (يدوياً بالكامل بدون محفظة)
+        st.markdown("### ✍️ إدخال وتوثيق الصفقة يدوياً")
+        with st.form("manual_trade_form"):
+            col_f1, col_f2, col_f3 = st.columns(3)
+            with col_f1:
+                m_type = st.selectbox("نوع الصفقة", ["CALL", "PUT"])
+                m_strike = st.number_input("سعر التنفيذ (Strike)", value=float(price), step=1.0)
+            with col_f2:
+                m_entry = st.number_input("سعر الدخول للعقد ($)", value=1.00, step=0.05)
+                m_contracts = st.number_input("عدد العقود", value=1, step=1)
+            with col_f3:
+                m_exp = st.text_input("تاريخ الانتهاء (YYYY-MM-DD)", value=target_expiration if target_expiration else "2026-10-16")
+                
+            submitted = st.form_submit_button("➕ حفظ وإضافة الصفقة للمتابعة المباشرة", use_container_width=True)
+            if submitted:
+                log_df = load_favorites()
+                new_row = {
+                    "Date": datetime.now().strftime('%m-%d %H:%M'),
+                    "Ticker": ticker_symbol,
+                    "Type": m_type,
+                    "Strike": m_strike,
+                    "Expiration": m_exp,
+                    "Entry_Price": m_entry,
+                    "Target_1": m_entry * 1.20,
+                    "Target_2": m_entry * 1.45,
+                    "Target_3": m_entry * 2.00,
+                    "Stop_Loss": m_entry * 0.82,
+                    "Contracts": m_contracts
+                }
+                log_df = pd.concat([log_df, pd.DataFrame([new_row])], ignore_index=True)
+                log_df.to_csv(LOG_FILE, index=False)
+                st.success("تم حفظ الصفقة بنجاح في الجدول أدناه! 🎯")
+                st.rerun()
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # 5. جدول الصفقات المفتوحة والمتابعة الحية
         st.markdown("### 📋 الصفقات المفتوحة والمتابعة الحية")
         log_df = load_favorites()
-        
-        # تنظيف الصفوف الفارغة إن وجدت
         log_df = log_df.dropna(subset=['Ticker', 'Entry_Price'])
 
         if not log_df.empty:
@@ -329,13 +312,13 @@ if ticker_symbol:
                         roi = ((curr_p - entry_p) / entry_p) * 100 if entry_p > 0 else 0.0
                         pnl_usd = (curr_p - entry_p) * 100 * num_c
                         
-                        if curr_p >= t3: status = "💎 تم تحضير +100%"
-                        elif curr_p >= t2: status = "🚀 تحقق الهدف 2"
-                        elif curr_p >= t1: status = "🎯 تحقق الهدف 1"
-                        elif curr_p <= sl: status = "🛑 ضرب وقف الخسارة"
+                        if curr_p >= t3: status = "💎 هدف 3 (+100%)"
+                        elif curr_p >= t2: status = "🚀 هدف 2 (+45%)"
+                        elif curr_p >= t1: status = "🎯 هدف 1 (+20%)"
+                        elif curr_p <= sl: status = "🛑 وقف خسارة"
                         else: status = "⏳ قيد التداول"
                     else:
-                        curr_p, roi, pnl_usd, status = entry_p, 0.0, 0.0, "⚪ انتهى العقد"
+                        curr_p, roi, pnl_usd, status = entry_p, 0.0, 0.0, "⚪ غير متوفر"
                 except Exception:
                     curr_p, roi, pnl_usd, status = entry_p, 0.0, 0.0, "🔄 تحديث"
 
@@ -357,16 +340,16 @@ if ticker_symbol:
             
             col_del1, col_del2 = st.columns([3, 1])
             with col_del1:
-                remove_num = st.selectbox("اختر رقم الصفقة لحذفها عند الإغلاق:", options=df_track["#"].tolist())
+                remove_num = st.selectbox("اختر رقم الصفقة لإزالتها:", options=df_track["#"].tolist())
             with col_del2:
                 st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("🗑️ إغلاق وحذف الصفقة"):
+                if st.button("🗑️ حذف الصفقة المغلقة"):
                     log_df = log_df.drop(remove_num - 1).reset_index(drop=True)
                     log_df.to_csv(LOG_FILE, index=False)
-                    st.success("تم إغلاق الصفقة وحذفها.")
+                    st.success("تم إزالة الصفقة.")
                     st.rerun()
         else:
-            st.info("لا توجد صفقات مفتوحة حالياً في قائمة المتابعة.")
+            st.info("لا توجد صفقات مضافة حالياً في قائمة المتابعة.")
 
     except Exception as e:
         st.error(f"حدث خطأ أثناء تحميل البيانات: {e}")
