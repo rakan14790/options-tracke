@@ -2,8 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import datetime
-import os
+import plotly.graph_objects as go
 
 # 1. تهيئة الصفحة والستايل المتجاوب مع الجوال
 st.set_page_config(page_title="Alpha Capital | Institutional Options Terminal", layout="wide", page_icon="💎")
@@ -71,34 +70,11 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 2. إدارة ملف السجل وتفادي KeyError
-LOG_FILE = "favorites_log.csv"
-REQUIRED_COLUMNS = [
-    "Date", "Ticker", "Type", "Strike", "Expiration", 
-    "Entry_Price", "Target_1", "Target_2", "Target_3", "Stop_Loss", "Contracts"
-]
-
-def load_favorites():
-    if not os.path.exists(LOG_FILE):
-        df = pd.DataFrame(columns=REQUIRED_COLUMNS)
-        df.to_csv(LOG_FILE, index=False)
-        return df
-    try:
-        df = pd.read_csv(LOG_FILE)
-        for col in REQUIRED_COLUMNS:
-            if col not in df.columns:
-                df[col] = np.nan
-        return df[REQUIRED_COLUMNS]
-    except Exception:
-        df = pd.DataFrame(columns=REQUIRED_COLUMNS)
-        df.to_csv(LOG_FILE, index=False)
-        return df
-
 # الهيدر الرئيسي
 st.markdown("<h1 class='gold-header'>💎 ALPHA CAPITAL | المنصة الرقمية للتداول المؤسسي</h1>", unsafe_allow_html=True)
-st.caption("🚀 محرك الخوارزميات المتقدم لاقتناص العقود مرتفعة الانفجار وحماية المحفظة")
+st.caption("🚀 محرك الخوارزميات المتقدم لاقتناص العقود مرتفعة الانفجار وتحليل سيولة الخيارات")
 
-# 3. إعدادات السهم الجانبية
+# 2. إعدادات السهم الجانبية
 st.sidebar.markdown("### 🔍 تحديد السهم والمُهل")
 ticker_symbol = st.sidebar.text_input("رمز السهم (Ticker)", value="NVDA").strip().upper()
 
@@ -115,7 +91,7 @@ if ticker_symbol:
         all_expirations = stock.options
         target_expiration = st.sidebar.selectbox("📅 اختر تاريخ انتهاء العقد:", all_expirations) if all_expirations else None
 
-        # تحليل القاما (GEX)
+        # تحليل القاما والسيولة (GEX)
         if target_expiration:
             opt = stock.option_chain(target_expiration)
             c_df, p_df = opt.calls.copy(), opt.puts.copy()
@@ -173,7 +149,7 @@ if ticker_symbol:
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # التقييم الخوارزمي
+        # التقييم الخوارزمي والتوصية
         signal_type = "NEUTRAL"
         confidence_score = 0
         dist_from_flip = ((price - gamma_flip) / gamma_flip) * 100
@@ -246,110 +222,64 @@ if ticker_symbol:
 
         st.divider()
 
-        # 4. إضافة وإدارة الصفقات (يدوياً بالكامل بدون محفظة)
-        st.markdown("### ✍️ إدخال وتوثيق الصفقة يدوياً")
-        with st.form("manual_trade_form"):
-            col_f1, col_f2, col_f3 = st.columns(3)
-            with col_f1:
-                m_type = st.selectbox("نوع الصفقة", ["CALL", "PUT"])
-                m_strike = st.number_input("سعر التنفيذ (Strike)", value=float(price), step=1.0)
-            with col_f2:
-                m_entry = st.number_input("سعر الدخول للعقد ($)", value=1.00, step=0.05)
-                m_contracts = st.number_input("عدد العقود", value=1, step=1)
-            with col_f3:
-                m_exp = st.text_input("تاريخ الانتهاء (YYYY-MM-DD)", value=target_expiration if target_expiration else "2026-10-16")
-                
-            submitted = st.form_submit_button("➕ حفظ وإضافة الصفقة للمتابعة المباشرة", use_container_width=True)
-            if submitted:
-                log_df = load_favorites()
-                new_row = {
-                    "Date": datetime.now().strftime('%m-%d %H:%M'),
-                    "Ticker": ticker_symbol,
-                    "Type": m_type,
-                    "Strike": m_strike,
-                    "Expiration": m_exp,
-                    "Entry_Price": m_entry,
-                    "Target_1": m_entry * 1.20,
-                    "Target_2": m_entry * 1.45,
-                    "Target_3": m_entry * 2.00,
-                    "Stop_Loss": m_entry * 0.82,
-                    "Contracts": m_contracts
-                }
-                log_df = pd.concat([log_df, pd.DataFrame([new_row])], ignore_index=True)
-                log_df.to_csv(LOG_FILE, index=False)
-                st.success("تم حفظ الصفقة بنجاح في الجدول أدناه! 🎯")
-                st.rerun()
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        # 5. جدول الصفقات المفتوحة والمتابعة الحية
-        st.markdown("### 📋 الصفقات المفتوحة والمتابعة الحية")
-        log_df = load_favorites()
-        log_df = log_df.dropna(subset=['Ticker', 'Entry_Price'])
-
-        if not log_df.empty:
-            rows_data = []
-            for idx, row in log_df.iterrows():
-                t_ticker = str(row['Ticker'])
-                t_strike = float(row['Strike'])
-                t_type = str(row['Type'])
-                t_exp = str(row['Expiration'])
-                entry_p = float(row['Entry_Price']) if pd.notnull(row['Entry_Price']) else 0.0
-                t1 = float(row['Target_1']) if pd.notnull(row['Target_1']) else 0.0
-                t2 = float(row['Target_2']) if pd.notnull(row['Target_2']) else 0.0
-                t3 = float(row['Target_3']) if pd.notnull(row['Target_3']) else 0.0
-                sl = float(row['Stop_Loss']) if pd.notnull(row['Stop_Loss']) else 0.0
-                num_c = float(row['Contracts']) if pd.notnull(row['Contracts']) else 1.0
-                
-                try:
-                    s_ticker = yf.Ticker(t_ticker)
-                    s_opt = s_ticker.option_chain(t_exp)
-                    chain = s_opt.calls if t_type == "CALL" else s_opt.puts
-                    matched = chain[chain['strike'] == t_strike]
-                    
-                    if not matched.empty:
-                        curr_p = float(matched['lastPrice'].values[0])
-                        roi = ((curr_p - entry_p) / entry_p) * 100 if entry_p > 0 else 0.0
-                        pnl_usd = (curr_p - entry_p) * 100 * num_c
-                        
-                        if curr_p >= t3: status = "💎 هدف 3 (+100%)"
-                        elif curr_p >= t2: status = "🚀 هدف 2 (+45%)"
-                        elif curr_p >= t1: status = "🎯 هدف 1 (+20%)"
-                        elif curr_p <= sl: status = "🛑 وقف خسارة"
-                        else: status = "⏳ قيد التداول"
-                    else:
-                        curr_p, roi, pnl_usd, status = entry_p, 0.0, 0.0, "⚪ غير متوفر"
-                except Exception:
-                    curr_p, roi, pnl_usd, status = entry_p, 0.0, 0.0, "🔄 تحديث"
-
-                rows_data.append({
-                    "#": idx + 1,
-                    "التاريخ": row['Date'],
-                    "الصفقة": f"{t_ticker} ${t_strike:g} {t_type}",
-                    "الانتهاء": t_exp,
-                    "العقود": int(num_c),
-                    "سعر الدخول": f"${entry_p:.2f}",
-                    "السعر اللحظي": f"${curr_p:.2f}" if isinstance(curr_p, float) else curr_p,
-                    "العائد (%)": f"{roi:+.1f}%",
-                    "الربح/الخسارة ($)": f"${pnl_usd:+.2f}",
-                    "الحالة": status
-                })
+        # 3. شارت القاما الصافية (Net GEX Chart) باستخدام Plotly
+        st.markdown(f"### 📊 شارت القاما الصافية (Net GEX) - الانهاء: [{target_expiration}]")
+        if not gex_near.empty:
+            fig_gex = go.Figure()
+            colors = ['#2ea043' if val >= 0 else '#da3633' for val in gex_near['Net_GEX']]
             
-            df_track = pd.DataFrame(rows_data)
-            st.dataframe(df_track, hide_index=True, use_container_width=True)
-            
-            col_del1, col_del2 = st.columns([3, 1])
-            with col_del1:
-                remove_num = st.selectbox("اختر رقم الصفقة لإزالتها:", options=df_track["#"].tolist())
-            with col_del2:
-                st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("🗑️ حذف الصفقة المغلقة"):
-                    log_df = log_df.drop(remove_num - 1).reset_index(drop=True)
-                    log_df.to_csv(LOG_FILE, index=False)
-                    st.success("تم إزالة الصفقة.")
-                    st.rerun()
+            fig_gex.add_trace(go.Bar(
+                x=gex_near['Net_GEX'],
+                y=gex_near['strike'].astype(str),
+                orientation='h',
+                marker_color=colors
+            ))
+
+            fig_gex.add_vline(x=0, line_dash="solid", line_color="#8b949e", line_width=1)
+            fig_gex.add_hline(y=str(gamma_flip), line_dash="dash", line_color="#a371f7", annotation_text=f"Gamma Flip: ${gamma_flip:.2f}")
+            fig_gex.add_hline(y=str(price), line_dash="solid", line_color="#388bfd", annotation_text=f"السعر الحالي: ${price:.2f}")
+
+            fig_gex.update_layout(
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font=dict(color='#f0f6fc'),
+                margin=dict(l=20, r=20, t=30, b=20),
+                height=420,
+                xaxis=dict(title="صافي القاما Net GEX ($)", gridcolor='#30363d'),
+                yaxis=dict(title="سعر الإضراب (Strike)", gridcolor='#30363d', type='category')
+            )
+            st.plotly_chart(fig_gex, use_container_width=True)
         else:
-            st.info("لا توجد صفقات مضافة حالياً في قائمة المتابعة.")
+            st.warning("لا توجد بيانات كافية لعرض شارت القاما ضمن النطاق الحالي.")
+
+        # 4. عمق السيولة والفوليوم بروفايل (Volume Profile)
+        st.markdown(f"### 🌊 عمق السيولة والفوليوم بروفايل المباشر ({ticker_symbol})")
+        if not c_df.empty and not p_df.empty:
+            vol_merged = pd.merge(
+                c_df.groupby('strike')['volume'].sum().reset_index().rename(columns={'volume': 'Call_Vol'}),
+                p_df.groupby('strike')['volume'].sum().reset_index().rename(columns={'volume': 'Put_Vol'}),
+                on='strike', how='outer'
+            ).fillna(0)
+            
+            vol_near = vol_merged[(vol_merged['strike'] >= price * 0.85) & (vol_merged['strike'] <= price * 1.15)]
+
+            if not vol_near.empty:
+                fig_vol = go.Figure()
+                fig_vol.add_trace(go.Bar(x=vol_near['strike'].astype(str), y=vol_near['Call_Vol'], name='سيولة الكول (Call Vol)', marker_color='#2ea043'))
+                fig_vol.add_trace(go.Bar(x=vol_near['strike'].astype(str), y=vol_near['Put_Vol'], name='سيولة البوت (Put Vol)', marker_color='#da3633'))
+
+                fig_vol.update_layout(
+                    barmode='stack',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='#f0f6fc'),
+                    margin=dict(l=20, r=20, t=30, b=20),
+                    height=380,
+                    xaxis=dict(title="سعر الإضراب (Strike)", gridcolor='#30363d'),
+                    yaxis=dict(title="حجم العقود (Volume)", gridcolor='#30363d'),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
+                st.plotly_chart(fig_vol, use_container_width=True)
 
     except Exception as e:
-        st.error(f"حدث خطأ أثناء تحميل البيانات: {e}")
+        st.error(f"حدث خطأ أثناء جلب وتحليل البيانات: {e}")
