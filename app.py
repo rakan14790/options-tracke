@@ -2,61 +2,50 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import plotly.graph_objects as go
 from datetime import datetime
 import os
 
-# إعدادات الواجهة الاحترافية (Dark Cyber/GEX Theme)
-st.set_page_config(page_title="منصة الراصد الاحترافية | Rased Style", layout="wide")
+# إعدادات الشاشة والواجهة الاحترافية (Dark Pro Trading Theme)
+st.set_page_config(page_title="NVDA Institutional Order Flow Dashboard", layout="wide")
 
 st.markdown("""
     <style>
-    .stApp { background-color: #0b0e14; color: #e1e4e8; }
-    .card-box {
-        background-color: #161b22;
-        border: 1px solid #30363d;
+    .stApp { background-color: #080a0f; color: #e1e4e8; }
+    .metric-card {
+        background: linear-gradient(145deg, #10141d, #171c28);
+        border: 1px solid #262c3a;
         border-radius: 12px;
         padding: 16px;
         text-align: center;
-        margin-bottom: 10px;
     }
-    .rased-card {
-        background: linear-gradient(135deg, #0d1117 0%, #161b22 100%);
-        border: 2px solid #1f6beb;
-        border-radius: 16px;
+    .profile-card {
+        background: #0f131c;
+        border: 1px solid #1f2636;
+        border-radius: 14px;
+        padding: 20px;
+        margin-bottom: 20px;
+    }
+    .recommendation-box {
+        background: linear-gradient(135deg, #0d2016 0%, #11291b 100%);
+        border: 2px solid #2ea043;
+        border-radius: 14px;
         padding: 22px;
         margin-bottom: 25px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.5);
     }
-    .rased-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 12px;
-        font-size: 1.2em;
-    }
-    .rased-val-up { color: #58a6ff; font-weight: bold; font-size: 1.3em; }
-    .rased-val-down { color: #79c0ff; font-weight: bold; font-size: 1.3em; }
-    .rased-status { color: #f0883e; font-weight: bold; font-size: 1.2em; }
-    .recommendation-box-win {
-        background-color: #1c2128;
-        border: 2px solid #2ea043;
-        border-radius: 12px;
-        padding: 20px;
-        margin-bottom: 25px;
-    }
-    .recommendation-box-wait {
-        background-color: #1c2128;
+    .wait-box {
+        background: linear-gradient(135deg, #241a0e 0%, #2e2111 100%);
         border: 2px solid #d29922;
-        border-radius: 12px;
-        padding: 20px;
+        border-radius: 14px;
+        padding: 22px;
         margin-bottom: 25px;
     }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🛡️ منصة الراصد الاحترافية (Rased Analysis Engine)")
+st.title("⚡ منصة تتبع عمق السيولة والتدفق المؤسسي | NVDA & Stocks Pro")
 
-# ملف سجل المفضلة والمتابعة
+# ملف المتابعة والمفضلة
 LOG_FILE = "favorites_log.csv"
 if not os.path.exists(LOG_FILE):
     df_empty = pd.DataFrame(columns=[
@@ -65,11 +54,10 @@ if not os.path.exists(LOG_FILE):
     ])
     df_empty.to_csv(LOG_FILE, index=False)
 
-# القائمة الجانبية للتحكم
-st.sidebar.header("⚙️ إعدادات المحفظة والبحث")
-ticker_symbol = st.sidebar.text_input("رمز الشركة / المؤشر", value="NVDA").upper()
+# الشريط الجانبي للتحكم
+st.sidebar.header("🎯 تخصيص المحفظة والشركة")
+ticker_symbol = st.sidebar.text_input("رمز السهم", value="NVDA").upper()
 max_contract_price = st.sidebar.number_input("الحد الأقصى لسعر العقد ($)", value=1.50, step=0.10)
-whale_filter = st.sidebar.slider("حد صفقات الحيتان ($)", min_value=50000, max_value=1000000, value=100000, step=25000)
 
 if ticker_symbol:
     try:
@@ -82,116 +70,124 @@ if ticker_symbol:
         pct_change = (change / prev_close) * 100
         
         expirations = stock.options
-        
-        # 1. حساب مستويات "مركز القوة" و "مركز الجذب" وحالة الجذب (RasedSPX Style)
-        power_center = price
-        magnet_center = price
-        magnet_status = "جاري الحساب..."
+
+        # 1. تحليل الفوليوم بروفايل والعمق (Volume Profile Engine)
+        poc_price = price
+        call_wall = price
+        put_wall = price
+        imbalance_ratio = 50.0
 
         if expirations:
             target_exp = expirations[0]
-            opt_chain = stock.option_chain(target_exp)
-            calls = opt_chain.calls.copy()
-            puts = opt_chain.puts.copy()
+            opt = stock.option_chain(target_exp)
+            calls, puts = opt.calls.copy(), opt.puts.copy()
 
             if not calls.empty and not puts.empty:
-                # مركز القوة: السترايك الممتلئ بأعلى فوليوم كول بالقرب من السعر
-                calls['Vol_Val'] = calls['volume'] * calls['lastPrice']
-                top_power_strike = calls.sort_values('Vol_Val', ascending=False).iloc[0]['strike']
-                power_center = top_power_strike
+                # تصفية السترايكات القريبة من السعر (±7.5%)
+                c_near = calls[(calls['strike'] >= price * 0.925) & (calls['strike'] <= price * 1.075)]
+                p_near = puts[(puts['strike'] >= price * 0.925) & (puts['strike'] <= price * 1.075)]
 
-                # مركز الجذب: السترايك ذو أكبر أوبن انترست (Max Open Interest Pin)
-                calls['OI_Val'] = calls['openInterest'].fillna(0)
-                top_magnet_strike = calls.sort_values('OI_Val', ascending=False).iloc[0]['strike']
-                magnet_center = top_magnet_strike
+                total_call_vol = c_near['volume'].sum() if not c_near.empty else 1
+                total_put_vol = p_near['volume'].sum() if not p_near.empty else 1
+                
+                # نسبة عدم التوازن بين الشراء والبيع (Order Flow Imbalance)
+                imbalance_ratio = (total_call_vol / (total_call_vol + total_put_vol)) * 100
 
-                # تحديد حالة الجذب بناءً على تموضع السعر الحالي
-                if min(power_center, magnet_center) <= price <= max(power_center, magnet_center):
-                    magnet_status = "تجاذب بين قوتين 🎯"
-                elif price < min(power_center, magnet_center):
-                    magnet_status = "انجذاب صاعد نحو مركز الجذب ⬆️"
-                else:
-                    magnet_status = "ضغط هبوطي أسفل مركز القوة ⬇️"
+                # تحديد أسطح القاما والـ POC
+                if not c_near.empty:
+                    call_wall = c_near.sort_values('volume', ascending=False).iloc[0]['strike']
+                if not p_near.empty:
+                    put_wall = p_near.sort_values('volume', ascending=False).iloc[0]['strike']
 
-        # 2. عرض كرت مستويات Rased
-        st.markdown(f"""
-        <div class='rased-card'>
-            <div class='rased-row'>
-                <span style='color: #8b949e;'>مركز القوة 💪</span>
-                <span class='rased-val-down'>⬇️ {power_center:g}</span>
-            </div>
-            <div class='rased-row'>
-                <span style='color: #8b949e;'>مركز الجذب 🧲</span>
-                <span class='rased-val-up'>⬆️ {magnet_center:g}</span>
-            </div>
-            <hr style='border-color: #30363d; margin: 15px 0;'>
-            <div class='rased-row'>
-                <span style='color: #8b949e;'>حالة الجذب 🎯</span>
-                <span class='rased-status'>{magnet_status}</span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+                poc_price = call_wall if total_call_vol > total_put_vol else put_wall
 
-        # 3. تحليل الاتجاهات والزخم اللحظي
-        hist = stock.history(period="5d", interval="15m")
-        
-        if not hist.empty:
-            sma20 = hist['Close'].rolling(20).mean().iloc[-1]
-            sma50 = hist['Close'].rolling(50).mean().iloc[-1]
-            vol_mom = hist['Volume'].iloc[-1] - hist['Volume'].mean()
-            
-            if price > sma20 and sma20 > sma50 and vol_mom > 0:
-                overall_trend = "صاعد قوي 🚀"
-                instant_trend = "صاعد 🟢"
-                momentum_status = "زخم شرائي عالي 🔥"
-                signal_type = "CALL"
-            elif price < sma20 and sma20 < sma50 and vol_mom > 0:
-                overall_trend = "هابط 🔻"
-                instant_trend = "هابط 🔴"
-                momentum_status = "زخم بيعي ضاغط 🔴"
-                signal_type = "PUT"
-            else:
-                overall_trend = "عرضي / غير مؤكد 🟡"
-                instant_trend = "متذبذب 🟡"
-                momentum_status = "زخم ضعيف ⚪"
-                signal_type = "NEUTRAL"
-        else:
-            overall_trend, instant_trend, momentum_status, signal_type = "غير متاح", "غير متاح", "غير متاح", "NEUTRAL"
-
-        # عرض الكروت العلوية للسهم
+        # 2. عرض كروت المؤشرات الحيوية
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.markdown(f"<div class='card-box'><h4>السعر اللحظي</h4><h2>${price:.2f}</h2><p>{'🟢' if change>=0 else '🔴'} {change:+.2f} ({pct_change:+.2f}%)</p></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='metric-card'><h4>السعر اللحظي</h4><h2>${price:.2f}</h2><p>{'🟢' if change>=0 else '🔴'} {change:+.2f} ({pct_change:+.2f}%)</p></div>", unsafe_allow_html=True)
         with col2:
-            st.markdown(f"<div class='card-box'><h4>الاتجاه العام</h4><h3>{overall_trend}</h3></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='metric-card'><h4>مستوى التجميع (POC)</h4><h2 style='color:#58a6ff;'>${poc_price:g}</h2><p>أعلى نقطة تداول</p></div>", unsafe_allow_html=True)
         with col3:
-            st.markdown(f"<div class='card-box'><h4>الاتجاه اللحظي</h4><h3>{instant_trend}</h3></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='metric-card'><h4>جدار القاما (Call Wall)</h4><h2 style='color:#2ea043;'>${call_wall:g}</h2><p>هدف المقاومة/الجذب</p></div>", unsafe_allow_html=True)
         with col4:
-            st.markdown(f"<div class='card-box'><h4>زخم التداول</h4><h3>{momentum_status}</h3></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='metric-card'><h4>خلل التدفق (Call/Put Ratio)</h4><h2>{imbalance_ratio:.1f}%</h2><p>{'سيطر الشرائيين 🟢' if imbalance_ratio>50 else 'سيطر البائعيين 🔴'}</p></div>", unsafe_allow_html=True)
 
         st.divider()
 
-        # 4. قسم التوصية الجبارة (صفقة +A)
-        st.subheader("🎯 التوصية المباشرة (فلتر صفقات +A)")
+        # 3. الرسم البياني التفاعلي لعمق السيولة (Volume Profile & Footprint Heatmap)
+        st.subheader(f"📊 عمق السيولة والفوليوم بروفايل المباشر ({ticker_symbol})")
         
+        if expirations:
+            target_exp = expirations[0]
+            opt = stock.option_chain(target_exp)
+            c_df, p_df = opt.calls.copy(), opt.puts.copy()
+            
+            c_df = c_df[(c_df['strike'] >= price * 0.93) & (c_df['strike'] <= price * 1.07)]
+            p_df = p_df[(p_df['strike'] >= price * 0.93) & (p_df['strike'] <= price * 1.07)]
+
+            fig = go.Figure()
+            
+            # سيولة الشراء (Call Buyers Volume)
+            fig.add_trace(go.Bar(
+                y=c_df['strike'],
+                x=c_df['volume'],
+                name='سيولة كول (Call Vol)',
+                orientation='h',
+                marker=dict(color='rgba(46, 160, 67, 0.85)')
+            ))
+
+            # سيولة البيع (Put Sellers/Buyers Volume)
+            fig.add_trace(go.Bar(
+                y=p_df['strike'],
+                x=-p_df['volume'],
+                name='سيولة بوت (Put Vol)',
+                orientation='h',
+                marker=dict(color='rgba(218, 54, 51, 0.85)')
+            ))
+
+            # خط السعر اللحظي
+            fig.add_hline(y=price, line_dash="dash", line_color="#f0883e", annotation_text=f"السعر اللحظي الحالي (${price:.2f})")
+
+            fig.update_layout(
+                barmode='relative',
+                title=dict(text=f"توزيع الفوليوم والسيولة على المستويات (تاريخ الانتهاء: {target_exp})", font=dict(color="#e1e4e8")),
+                paper_bgcolor='#080a0f',
+                plot_bgcolor='#0f131c',
+                xaxis=dict(title="حجم التداول اللحظي (Volume Flow)", gridcolor='#161b22', zerolinecolor='#30363d'),
+                yaxis=dict(title="مستويات السترايك ($)", gridcolor='#161b22', autorange="reversed"),
+                legend=dict(font=dict(color="#e1e4e8")),
+                height=450,
+                margin=dict(l=20, r=20, t=40, b=20)
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+
+        st.divider()
+
+        # 4. التوصية الجاهزة وعالية التأكيد (+A Grade Setup)
+        st.subheader("🎯 التوصية الفورية (إشارة دخول مؤكدة للـ $200)")
+        
+        hist = stock.history(period="5d", interval="15m")
+        signal_type = "NEUTRAL"
+        
+        if not hist.empty:
+            sma20 = hist['Close'].rolling(20).mean().iloc[-1]
+            if price > sma20 and imbalance_ratio > 52:
+                signal_type = "CALL"
+            elif price < sma20 and imbalance_ratio < 48:
+                signal_type = "PUT"
+
         if expirations and signal_type != "NEUTRAL":
             target_exp = expirations[0]
             opt = stock.option_chain(target_exp)
             selected_contract = None
             
-            if signal_type == "CALL":
-                calls = opt.calls.copy()
-                calls['Trade_Value'] = calls['volume'] * calls['lastPrice'] * 100
-                valid_calls = calls[(calls['lastPrice'] <= max_contract_price) & (calls['lastPrice'] >= 0.30)]
-                if not valid_calls.empty:
-                    selected_contract = valid_calls.sort_values('Trade_Value', ascending=False).iloc[0]
+            chain = opt.calls if signal_type == "CALL" else opt.puts
+            chain['Trade_Value'] = chain['volume'] * chain['lastPrice'] * 100
+            valid = chain[(chain['lastPrice'] <= max_contract_price) & (chain['lastPrice'] >= 0.30)]
             
-            elif signal_type == "PUT":
-                puts = opt.puts.copy()
-                puts['Trade_Value'] = puts['volume'] * puts['lastPrice'] * 100
-                valid_puts = puts[(puts['lastPrice'] <= max_contract_price) & (puts['lastPrice'] >= 0.30)]
-                if not valid_puts.empty:
-                    selected_contract = valid_puts.sort_values('Trade_Value', ascending=False).iloc[0]
+            if not valid.empty:
+                selected_contract = valid.sort_values('Trade_Value', ascending=False).iloc[0]
 
             if selected_contract is not None:
                 strike_price = selected_contract['strike']
@@ -203,20 +199,20 @@ if ticker_symbol:
                 stop_loss = contract_price * 0.85 # -15%
                 
                 st.markdown(f"""
-                <div class='recommendation-box-win'>
-                    <h3>🏆 صفقة درجة (+A Setup): {ticker_symbol} - ${strike_price:g} {c_type}</h3>
-                    <p><b>تاريخ العقد:</b> {target_exp} | <b>سعر دخول العقد الموصى به:</b> <span style='color:#f0883e; font-size:1.3em;'>${contract_price:.2f}</span> (${contract_price*100:.0f} للعقد)</p>
-                    <p style='color:#8b949e;'>💡 <b>تحليل السيولة:</b> توافق بين مركز الجذب ({magnet_center:g}) والزخم اللحظي لتداول منخفض المخاطر.</p>
+                <div class='recommendation-box'>
+                    <h3>🏆 فرصة درجة (+A) على أسهم {ticker_symbol} - ${strike_price:g} {c_type}</h3>
+                    <p><b>تاريخ الانتهاء:</b> {target_exp} | <b>سعر الدخول:</b> <span style='color:#f0883e; font-size:1.3em;'>${contract_price:.2f}</span> (${contract_price*100:.0f} للعقد)</p>
+                    <p style='color:#8b949e;'>💡 <b>سبب الترشيح:</b> اختراق إيجابي لعمق السيولة مع تفوق فوليوم الـ {c_type} بنسبة {imbalance_ratio:.1f}%.</p>
                     <hr style='border-color: #30363d;'>
                     <div style='display: flex; justify-content: space-around; text-align: center;'>
                         <div><h4>🎯 الهدف الأول (+25%)</h4><h3 style='color: #2ea043;'>${target_1:.2f}</h3></div>
                         <div><h4>🚀 الهدف الثاني (+50%)</h4><h3 style='color: #58a6ff;'>${target_2:.2f}</h3></div>
-                        <div><h4>🛑 وقف الخسارة الصارم (-15%)</h4><h3 style='color: #da3633;'>${stop_loss:.2f}</h3></div>
+                        <div><h4>🛑 وقف الخسارة (-15%)</h4><h3 style='color: #da3633;'>${stop_loss:.2f}</h3></div>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
 
-                if st.button("💖 إضافة التوصية فوراً إلى قائمة المتابعة"):
+                if st.button("💖 إضافة الفرصة إلى جدول المتابعة"):
                     log_df = pd.read_csv(LOG_FILE)
                     new_row = {
                         "Date": datetime.now().strftime('%m-%d %H:%M'),
@@ -231,20 +227,18 @@ if ticker_symbol:
                     }
                     log_df = pd.concat([log_df, pd.DataFrame([new_row])], ignore_index=True)
                     log_df.to_csv(LOG_FILE, index=False)
-                    st.success("تم إضافة العقد إلى قائمة المفضلة والمتابعة 💖")
-            else:
-                st.info("لا يوجد عقد مستوفٍ لكافة شروط صفقة +A حالياً.")
+                    st.success("تم إضافة العقد بنجاح! 💖")
         else:
             st.markdown("""
-            <div class='recommendation-box-wait'>
-                <h3>🛑 قرار المحفظة: لا توجد صفقة +A حالياً (امسك الكاش)</h3>
-                <p>السوق في حالة تذبذب أو تجاذب غير محسم بين مراكز السيولة. للحفاظ على الـ $200، انتظر إشارة واضحة.</p>
+            <div class='wait-box'>
+                <h3>🛑 قرار المحفظة: امسك الكاش (Wait & Protect Capital)</h3>
+                <p>لا يوجد انحياز صريح في عمق التداول وحجم السيولة حالياً. لحماية محفظتك، انتظر وضوح اتجاه السوق.</p>
             </div>
             """, unsafe_allow_html=True)
 
         st.divider()
 
-        # 5. جدول صفقات المتابعة بدون Index
+        # 5. جدول المتابعة المباشر (سهل وسريع الإزالة)
         st.subheader("💖 صفقات المتابعة والمفضلة")
         log_df = pd.read_csv(LOG_FILE)
         
@@ -268,40 +262,32 @@ if ticker_symbol:
                         curr_p = float(matched['lastPrice'].values[0])
                         roi = ((curr_p - entry_price) / entry_price) * 100
                         
-                        if curr_p >= t2:
-                            achievement = "🚀 الهدف 2 (+50%)"
-                        elif curr_p >= t1:
-                            achievement = "🎯 الهدف 1 (+25%)"
-                        elif curr_p < entry_price * 0.85:
-                            achievement = "🛑 ضرب وقف الخسارة"
-                        else:
-                            achievement = "⏳ قيد التداول"
+                        if curr_p >= t2: achievement = "🚀 الهدف 2 (+50%)"
+                        elif curr_p >= t1: achievement = "🎯 الهدف 1 (+25%)"
+                        elif curr_p < entry_price * 0.85: achievement = "🛑 ضرب وقف الخسارة"
+                        else: achievement = "⏳ قيد التداول"
                     else:
-                        curr_p = "منتهي"
-                        roi = 0.0
-                        achievement = "⚪ انتهى العقد"
+                        curr_p, roi, achievement = "منتهي", 0.0, "⚪ انتهى العقد"
                 except:
-                    curr_p = entry_price
-                    roi = 0.0
-                    achievement = "🔄 جاري التحديث"
+                    curr_p, roi, achievement = entry_price, 0.0, "🔄 جاري التحديث"
 
                 rows_data.append({
                     "#": idx + 1,
                     "الوقت": row['Date'],
-                    "الرمز والعقد": f"{t_ticker} ${t_strike:g} {t_type}",
+                    "العقد": f"{t_ticker} ${t_strike:g} {t_type}",
                     "الانتهاء": t_exp,
                     "سعر الدخول": f"${entry_price:.2f}",
                     "الهدف 1": f"${t1:.2f}",
                     "الهدف 2": f"${t2:.2f}",
                     "السعر الحالي": f"${curr_p:.2f}" if isinstance(curr_p, float) else curr_p,
-                    "الربح / الخسارة": f"{roi:+.1f}%",
+                    "الربح/الخسارة": f"{roi:+.1f}%",
                     "الحالة": achievement
                 })
             
             df_track = pd.DataFrame(rows_data)
             st.dataframe(df_track, hide_index=True, use_container_width=True)
             
-            remove_num = st.selectbox("اختر رقم الصفقة لإزالتها من القائمة:", options=df_track["#"].tolist())
+            remove_num = st.selectbox("اختر رقم الصفقة لحذفها:", options=df_track["#"].tolist())
             if st.button("💔 إزالة من المفضلة"):
                 log_df = log_df.drop(remove_num - 1).reset_index(drop=True)
                 log_df.to_csv(LOG_FILE, index=False)
@@ -309,63 +295,5 @@ if ticker_symbol:
         else:
             st.info("لا توجد صفقات في المتابعة حالياً.")
 
-        st.divider()
-
-        # 6. جدول صفقات الحيتان والأوبن انترست
-        st.subheader("🐋 رصد صفقات الحيتان وتوزيع السيولة")
-        selected_exp = st.selectbox("تاريخ عقد الحيتان:", options=expirations[:3])
-        opt_data = stock.option_chain(selected_exp)
-        
-        calls_df, puts_df = opt_data.calls.copy(), opt_data.puts.copy()
-        calls_df['Type'], puts_df['Type'] = 'Call 🟢', 'Put 🔴'
-        df_all = pd.concat([calls_df, puts_df])
-        df_all['Trade_Value'] = df_all['volume'] * df_all['lastPrice'] * 100
-        
-        # تصفية السترايكات القريبة بنسبة ±5%
-        lower_bound, upper_bound = price * 0.95, price * 1.05
-        whales = df_all[(df_all['strike'] >= lower_bound) & (df_all['strike'] <= upper_bound)].copy()
-        whales = whales[whales['Trade_Value'] >= whale_filter].copy()
-        
-        if not whales.empty:
-            def format_vol(v):
-                if pd.isna(v): return "0"
-                if v >= 1000:
-                    return f"{v/1000:.1f}K"
-                return str(int(v))
-
-            def analyze_flow_nature(r):
-                last, ask, bid = r['lastPrice'], r['ask'], r['bid']
-                vol = r['volume']
-                oi = r['openInterest'] if 'openInterest' in r and not pd.isna(r['openInterest']) else 1
-                
-                is_unusual = vol > oi
-                
-                if ask > 0 and last >= ask:
-                    return "شراء جديد (Debit 🟢)" if is_unusual else "شراء بسعر العرض"
-                elif bid > 0 and last <= bid:
-                    return "بيع/تفريغ (Credit 🔴)" if is_unusual else "بيع بسعر الطلب"
-                else:
-                    return "تداول موازٍ (Hedge 🟡)"
-
-            whales['طبيعة الحركة'] = whales.apply(analyze_flow_nature, axis=1)
-
-            df_display = pd.DataFrame({
-                'النوع': whales['Type'],
-                'السترايك': whales['strike'],
-                'سعر العقد': whales['lastPrice'].apply(lambda x: f"${x:.2f}"),
-                'الفوليوم (Volume)': whales['volume'].apply(format_vol),
-                'الأوبن انترست (OI)': whales['openInterest'].apply(format_vol),
-                'طبيعة التنفيذ': whales['طبيعة الحركة'],
-                'إجمالي قيمة الصفقة': whales['Trade_Value'].apply(lambda x: f"${x/1000:.1f}K" if x < 1000000 else f"${x/1000000:.2f}M")
-            })
-
-            # ترتيب السترايكات تنازلياً
-            df_display = df_display.sort_values('السترايك', ascending=False)
-            df_display['السترايك'] = df_display['السترايك'].apply(lambda x: f"${x:g}")
-
-            st.dataframe(df_display, hide_index=True, use_container_width=True, height=450)
-        else:
-            st.info(f"لا توجد حركة حيتان مكثفة قريبة جداً من سعر السهم الحالي (${price:.2f}).")
-
     except Exception as e:
-        st.error(f"حدث خطأ أثناء تحليل البيانات: {e}")
+        st.error(f"حدث خطأ أثناء تحميل البيانات: {e}")
