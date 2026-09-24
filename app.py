@@ -175,8 +175,8 @@ if ticker_symbol:
 
         st.divider()
 
-        # 3. جدول صفقات المتابعة بأسلوب الترقيم البسيط #1, #2...
-        st.subheader("💖 صفقات المتابعة والمفضلة (ترقيم مبسط وإزالة فوريّة)")
+        # 3. جدول صفقات المتابعة بأسلوب الترقيم البسيط وبدون Index جانبي
+        st.subheader("💖 صفقات المتابعة والمفضلة")
         log_df = pd.read_csv(LOG_FILE)
         
         if not log_df.empty:
@@ -230,7 +230,8 @@ if ticker_symbol:
                 })
             
             df_track = pd.DataFrame(rows_data)
-            st.dataframe(df_track, use_container_width=True)
+            # hide_index=True لإخفاء أرقام الـ Index الجانبية نهائياً
+            st.dataframe(df_track, hide_index=True, use_container_width=True)
             
             remove_num = st.selectbox("اختر رقم الصفقة لإزالتها من القائمة:", options=df_track["#"].tolist())
             if st.button("💔 إزالة من المفضلة"):
@@ -242,8 +243,8 @@ if ticker_symbol:
 
         st.divider()
 
-        # 4. جدول تدفق صفقات الحيتان (بدون عرض وطلب + سترايكات مرتبة تنازلياً)
-        st.subheader("🐋 رصد صفقات الحيتان (مرتبة حسب السترايك)")
+        # 4. جدول تدفق صفقات الحيتان المطور (تحديد الشورت واللونق + بدون Index)
+        st.subheader("🐋 رصد صفقات الحيتان (مفهومة ودقيقة)")
         selected_exp = st.selectbox("تاريخ عقد الحيتان:", options=expirations[:3])
         opt_data = stock.option_chain(selected_exp)
         
@@ -258,29 +259,41 @@ if ticker_symbol:
         whales = whales[whales['Trade_Value'] >= whale_filter].copy()
         
         if not whales.empty:
-            # دالة اختصار أرقام الفوليوم (K)
             def format_vol(v):
                 if pd.isna(v): return "0"
                 if v >= 1000:
                     return f"{v/1000:.1f}K"
                 return str(int(v))
 
+            def determine_action(r):
+                last, ask, bid = r['lastPrice'], r['ask'], r['bid']
+                opt_type = r['Type']
+                
+                # تحليل حركة الشراء/البيع المباشر بناء على الـ Ask / Bid
+                if ask > 0 and last >= ask:
+                    return "شراء Ask (لونق 🟢)" if "Call" in opt_type else "شراء Put (رهان هبوط 🐻)"
+                elif bid > 0 and last <= bid:
+                    return "بيع Bid (تفريغ/شورت 🔴)" if "Call" in opt_type else "بيع Put (جدار دعم 🛡️)"
+                else:
+                    return "تداول موازٍ 🟡"
+
+            whales['التنفيذ المتوقع'] = whales.apply(determine_action, axis=1)
+
             df_display = pd.DataFrame({
                 'النوع': whales['Type'],
-                'السترايك': whales['strike'],  # الاحتفاظ به كرقم من أجل الترتيب الصحيح
-                'تاريخ العقد': selected_exp,
-                'سعر العقد الحالي': whales['lastPrice'].apply(lambda x: f"${x:.2f}"),
+                'السترايك': whales['strike'],
+                'سعر العقد': whales['lastPrice'].apply(lambda x: f"${x:.2f}"),
                 'عدد العقود (Volume)': whales['volume'].apply(format_vol),
-                'إجمالي قيمة الصفقة': whales['Trade_Value'].apply(lambda x: f"${x/1000:.1f}K" if x < 1000000 else f"${x/1000000:.2f}M")
+                'توقعات الحركة (لونق/شورت)': whales['التنفيذ المتوقع'],
+                'إجمالي السيولة': whales['Trade_Value'].apply(lambda x: f"${x/1000:.1f}K" if x < 1000000 else f"${x/1000000:.2f}M")
             })
 
-            # ترتيب السترايكات تنازلياً (من الأكبر إلى الأصغر: 235 ثم 232.5 ثم 230)
+            # ترتيب السترايكات تنازلياً
             df_display = df_display.sort_values('السترايك', ascending=False)
-            
-            # تنسيق رمز السترايك بإضافة $ بعد الترتيب
             df_display['السترايك'] = df_display['السترايك'].apply(lambda x: f"${x:g}")
 
-            st.dataframe(df_display, use_container_width=True, height=420)
+            # hide_index=True لإخفاء أرقام الـ Index الجانبية (47, 46, 45)
+            st.dataframe(df_display, hide_index=True, use_container_width=True, height=420)
         else:
             st.info(f"لا توجد حركة حيتان مكثفة قريبة جداً من سعر السهم الحالي (${price:.2f}).")
 
