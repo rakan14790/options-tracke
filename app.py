@@ -6,7 +6,7 @@ from datetime import datetime
 import os
 
 # إعدادات الواجهة الاحترافية (Dark Dashboard Theme)
-st.set_page_config(page_title="راصد الأسهم والتوصيات الدقيقة", layout="wide")
+st.set_page_config(page_title="راصد التداول الصارم | $200 Account", layout="wide")
 
 st.markdown("""
     <style>
@@ -19,9 +19,16 @@ st.markdown("""
         text-align: center;
         margin-bottom: 10px;
     }
-    .recommendation-box {
+    .recommendation-box-win {
         background-color: #1c2128;
         border: 2px solid #2ea043;
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 25px;
+    }
+    .recommendation-box-wait {
+        background-color: #1c2128;
+        border: 2px solid #d29922;
         border-radius: 12px;
         padding: 20px;
         margin-bottom: 25px;
@@ -29,10 +36,10 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("⚡ منصة الراصد الذكي والتوصيات المخصصة (Max $2.00)")
+st.title("🛡️ راصد التداول الصارم (إدارة محفظة الـ $200)")
 
-# ملف سجل التوصيات
-LOG_FILE = "recommendations_targets_log.csv"
+# ملف سجل المفضلة والمتابعة
+LOG_FILE = "favorites_log.csv"
 if not os.path.exists(LOG_FILE):
     df_empty = pd.DataFrame(columns=[
         "ID", "Date", "Ticker", "Type", "Strike", "Expiration", 
@@ -40,12 +47,11 @@ if not os.path.exists(LOG_FILE):
     ])
     df_empty.to_csv(LOG_FILE, index=False)
 
-# القائمة الجانبية
-st.sidebar.header("⚙️ إعدادات المحلل")
+# القائمة الجانبية للتحكم
+st.sidebar.header("⚙️ إعدادات المحفظة والبحث")
 ticker_symbol = st.sidebar.text_input("رمز الشركة (Ticker)", value="NVDA").upper()
-max_contract_price = st.sidebar.number_input("الحد الأقصى لسعر العقد ($)", value=2.00, step=0.10)
-whale_filter = st.sidebar.slider("حد صفقات الحيتان ($)", min_value=50000, max_value=1000000, value=150000, step=50000)
-min_vol_filter = st.sidebar.number_input("الحد الأدنى للفوليوم الملحوظ", value=500, step=100)
+max_contract_price = st.sidebar.number_input("الحد الأقصى لسعر العقد ($)", value=1.50, step=0.10)
+whale_filter = st.sidebar.slider("حد صفقات الحيتان ($)", min_value=50000, max_value=1000000, value=100000, step=25000)
 
 if ticker_symbol:
     try:
@@ -57,32 +63,33 @@ if ticker_symbol:
         change = price - prev_close
         pct_change = (change / prev_close) * 100
         
-        # 1. تحليل الاتجاهات والزخم
+        # 1. تحليل الاتجاهات اللحظية بدقة
         hist = stock.history(period="5d", interval="15m")
         
         if not hist.empty:
             sma20 = hist['Close'].rolling(20).mean().iloc[-1]
             sma50 = hist['Close'].rolling(50).mean().iloc[-1]
+            vol_mom = hist['Volume'].iloc[-1] - hist['Volume'].mean()
             
-            if price > sma20 and sma20 > sma50:
+            if price > sma20 and sma20 > sma50 and vol_mom > 0:
                 overall_trend = "صاعد قوي 🚀"
                 instant_trend = "صاعد 🟢"
-                momentum_status = "زخم شرائي عالٍ 🟢"
+                momentum_status = "زخم شرائي عالي 🔥"
                 signal_type = "CALL"
-            elif price < sma20 and sma20 < sma50:
+            elif price < sma20 and sma20 < sma50 and vol_mom > 0:
                 overall_trend = "هابط 🔻"
                 instant_trend = "هابط 🔴"
                 momentum_status = "زخم بيعي ضاغط 🔴"
                 signal_type = "PUT"
             else:
-                overall_trend = "عرضي 🟡"
+                overall_trend = "عرضي / غير مؤكد 🟡"
                 instant_trend = "متذبذب 🟡"
-                momentum_status = "زخم محايد ⚪"
+                momentum_status = "زخم ضعيف ⚪"
                 signal_type = "NEUTRAL"
         else:
             overall_trend, instant_trend, momentum_status, signal_type = "غير متاح", "غير متاح", "غير متاح", "NEUTRAL"
 
-        # عرض ملخص السهم
+        # عرض الكروت العلوية
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.markdown(f"<div class='card-box'><h4>السعر اللحظي</h4><h2>${price:.2f}</h2><p>{'🟢' if change>=0 else '🔴'} {change:+.2f} ({pct_change:+.2f}%)</p></div>", unsafe_allow_html=True)
@@ -91,15 +98,15 @@ if ticker_symbol:
         with col3:
             st.markdown(f"<div class='card-box'><h4>الاتجاه اللحظي</h4><h3>{instant_trend}</h3></div>", unsafe_allow_html=True)
         with col4:
-            st.markdown(f"<div class='card-box'><h4>زخم السوق</h4><h3>{momentum_status}</h3></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='card-box'><h4>زخم التداول</h4><h3>{momentum_status}</h3></div>", unsafe_allow_html=True)
 
         st.divider()
 
-        # 2. توليد التوصية المباشرة
-        st.subheader("🎯 التوصية المباشرة (شرط سعر العقد ≤ $2.00)")
+        # 2. قسم التوصية عالية الدقة (High-Probability Signal)
+        st.subheader("🎯 التوصية عالية التأكيد (مخاطرة منخفضة)")
         expirations = stock.options
         
-        if expirations:
+        if expirations and signal_type != "NEUTRAL":
             target_exp = expirations[0]
             opt = stock.option_chain(target_exp)
             selected_contract = None
@@ -107,14 +114,14 @@ if ticker_symbol:
             if signal_type == "CALL":
                 calls = opt.calls.copy()
                 calls['Trade_Value'] = calls['volume'] * calls['lastPrice'] * 100
-                valid_calls = calls[(calls['lastPrice'] <= max_contract_price) & (calls['lastPrice'] > 0)]
+                valid_calls = calls[(calls['lastPrice'] <= max_contract_price) & (calls['lastPrice'] >= 0.30)]
                 if not valid_calls.empty:
                     selected_contract = valid_calls.sort_values('Trade_Value', ascending=False).iloc[0]
             
             elif signal_type == "PUT":
                 puts = opt.puts.copy()
                 puts['Trade_Value'] = puts['volume'] * puts['lastPrice'] * 100
-                valid_puts = puts[(puts['lastPrice'] <= max_contract_price) & (puts['lastPrice'] > 0)]
+                valid_puts = puts[(puts['lastPrice'] <= max_contract_price) & (puts['lastPrice'] >= 0.30)]
                 if not valid_puts.empty:
                     selected_contract = valid_puts.sort_values('Trade_Value', ascending=False).iloc[0]
 
@@ -123,30 +130,29 @@ if ticker_symbol:
                 contract_price = selected_contract['lastPrice']
                 c_type = "CALL" if signal_type == "CALL" else "PUT"
                 
-                target_1 = contract_price * 1.20
-                target_2 = contract_price * 1.50
-                stop_loss = contract_price * 0.80
-                border_color = "#2ea043" if c_type == "CALL" else "#da3633"
+                target_1 = contract_price * 1.25  # +25%
+                target_2 = contract_price * 1.50  # +50%
+                stop_loss = contract_price * 0.85 # -15%
                 
                 st.markdown(f"""
-                <div class='recommendation-box' style='border-color: {border_color};'>
-                    <h3>🟢 التوصية الدقيقة: {ticker_symbol} - ${strike_price:g} {c_type}</h3>
-                    <p><b>تاريخ الانتهاء:</b> {target_exp} | <b>سعر دخول العقد:</b> <span style='color:#f0883e; font-size:1.3em;'>${contract_price:.2f}</span></p>
+                <div class='recommendation-box-win'>
+                    <h3>🔥 فرصة دقيقة للـ $200: {ticker_symbol} - ${strike_price:g} {c_type}</h3>
+                    <p><b>تاريخ العقد:</b> {target_exp} | <b>سعر الدخول الموصى به:</b> <span style='color:#f0883e; font-size:1.3em;'>${contract_price:.2f}</span> (${contract_price*100:.0f} للعقد)</p>
                     <hr style='border-color: #30363d;'>
                     <div style='display: flex; justify-content: space-around; text-align: center;'>
-                        <div><h4>🎯 الهدف الأول (+20%)</h4><h3 style='color: #2ea043;'>${target_1:.2f}</h3></div>
+                        <div><h4>🎯 الهدف الأول (+25%)</h4><h3 style='color: #2ea043;'>${target_1:.2f}</h3></div>
                         <div><h4>🚀 الهدف الثاني (+50%)</h4><h3 style='color: #58a6ff;'>${target_2:.2f}</h3></div>
-                        <div><h4>🛑 وقف الخسارة (-20%)</h4><h3 style='color: #da3633;'>${stop_loss:.2f}</h3></div>
+                        <div><h4>🛑 وقف الخسارة الصارم (-15%)</h4><h3 style='color: #da3633;'>${stop_loss:.2f}</h3></div>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
 
-                if st.button("📌 حفظ التوصية في جدول المتابعة"):
+                if st.button("💖 إضافة التوصية فوراً إلى قائمة المتابعة"):
                     log_df = pd.read_csv(LOG_FILE)
                     new_id = int(datetime.now().timestamp())
                     new_row = {
                         "ID": new_id,
-                        "Date": datetime.now().strftime('%Y-%m-%d %H:%M'),
+                        "Date": datetime.now().strftime('%m-%d %H:%M'),
                         "Ticker": ticker_symbol,
                         "Type": c_type,
                         "Strike": strike_price,
@@ -158,14 +164,21 @@ if ticker_symbol:
                     }
                     log_df = pd.concat([log_df, pd.DataFrame([new_row])], ignore_index=True)
                     log_df.to_csv(LOG_FILE, index=False)
-                    st.success("تم حفظ الصفقة في جدول المتابعة بنجاح!")
+                    st.success("تم إضافة العقد إلى قائمة المفضلة والمتابعة 💖")
             else:
-                st.info(f"لا يوجد عقد {signal_type} بسعر أقل من ${max_contract_price:.2f} حالياً.")
+                st.info("لا يوجد عقد مناسب بشرط السعر والسيولة حالياً.")
+        else:
+            st.markdown("""
+            <div class='recommendation-box-wait'>
+                <h3>🛑 قرار المحفظة: عدم الدخول (امسك الكاش)</h3>
+                <p>السوق في حالة تذبذب أو عدم توافق بين الاتجاه والزخم. لحماية الـ $200، ننتظر سيولة صريحة قبل الدخول.</p>
+            </div>
+            """, unsafe_allow_html=True)
 
         st.divider()
 
-        # 3. جدول متابعة الصفقات المنظم مع زر الحذف التفاعلي
-        st.subheader("📈 جدول متابعة الصفقات الحالية")
+        # 3. جدول الصفقات المفضلة والمتابعة (مع زر الإزالة 💔)
+        st.subheader("💖 صفقات المتابعة والمفضلة (حفظ وحذف بنقرة)")
         log_df = pd.read_csv(LOG_FILE)
         
         if not log_df.empty:
@@ -189,11 +202,11 @@ if ticker_symbol:
                         roi = ((curr_p - entry_price) / entry_price) * 100
                         
                         if curr_p >= t2:
-                            achievement = "🚀 الهدف 2 (+50%)"
+                            achievement = "🚀 حقق الهدف الثاني (+50%)"
                         elif curr_p >= t1:
-                            achievement = "🎯 الهدف 1 (+20%)"
-                        elif curr_p < entry_price * 0.8:
-                            achievement = "🛑 وقف الخسارة"
+                            achievement = "🎯 حقق الهدف الأول (+25%)"
+                        elif curr_p < entry_price * 0.85:
+                            achievement = "🛑 ضرب وقف الخسارة"
                         else:
                             achievement = "⏳ قيد التداول"
                     else:
@@ -206,38 +219,35 @@ if ticker_symbol:
                     achievement = "🔄 جاري التحديث"
 
                 rows_data.append({
-                    "رمز الصفقة": int(row['ID']) if 'ID' in row and not pd.isna(row['ID']) else idx,
-                    "التاريخ": row['Date'],
-                    "الشركة والعقد": f"{t_ticker} ${t_strike:g} {t_type}",
-                    "تاريخ الانتهاء": t_exp,
+                    "المعرف": int(row['ID']) if 'ID' in row and not pd.isna(row['ID']) else idx,
+                    "الوقت": row['Date'],
+                    "الرمز والعقد": f"{t_ticker} ${t_strike:g} {t_type}",
+                    "الانتهاء": t_exp,
                     "سعر الدخول": f"${entry_price:.2f}",
                     "الهدف 1": f"${t1:.2f}",
                     "الهدف 2": f"${t2:.2f}",
                     "السعر الحالي": f"${curr_p:.2f}" if isinstance(curr_p, float) else curr_p,
-                    "الربح/الخسارة": f"{roi:+.1f}%",
+                    "الربح / الخسارة": f"{roi:+.1f}%",
                     "الحالة": achievement
                 })
             
             df_track = pd.DataFrame(rows_data)
             st.dataframe(df_track, use_container_width=True)
             
-            # قسم خيارات الحذف السريعة للصفقات المنتهية
-            del_id = st.selectbox("اختر الصفقة لحذفها من الجدول:", options=df_track["رمز الصفقة"].tolist())
-            if st.button("🗑️ حذف الصفقة المحددة"):
-                if 'ID' in log_df.columns:
-                    log_df = log_df[log_df['ID'] != del_id]
-                else:
-                    log_df = log_df.drop(del_id)
+            # زر إزالة الصفقة من المفضلة
+            remove_id = st.selectbox("اختر صفقة لإزالتها من المتابعة:", options=df_track["المعرف"].tolist())
+            if st.button("💔 إزالة من المفضلة"):
+                log_df = log_df[log_df['ID'] != remove_id]
                 log_df.to_csv(LOG_FILE, index=False)
                 st.rerun()
         else:
-            st.info("لا توجد صفقات في جدول المتابعة حالياً.")
+            st.info("لا توجد صفقات في المتابعة حالياً. اضغط على 💖 في التوصية لإضافتها هنا.")
 
         st.divider()
 
-        # 4. جدول تدفق صفقات الحيتان الشامل لسعر العقد والسترايكات
-        st.subheader("🐋 رصد صفقات الحيتان (يشمل سعر العقد والفوليوم العالي)")
-        selected_exp = st.selectbox("عرض صفقات الحيتان حسب التاريخ:", options=expirations[:3])
+        # 4. جدول تدفق صفقات الحيتان (حول السعر اللحظي فقط)
+        st.subheader("🐋 رصد صفقات الحيتان (السترايكات القريبة وسعر العقد اللحظي)")
+        selected_exp = st.selectbox("تاريخ عقد الحيتان:", options=expirations[:3])
         opt_data = stock.option_chain(selected_exp)
         
         calls_df, puts_df = opt_data.calls.copy(), opt_data.puts.copy()
@@ -245,26 +255,25 @@ if ticker_symbol:
         df_all = pd.concat([calls_df, puts_df])
         df_all['Trade_Value'] = df_all['volume'] * df_all['lastPrice'] * 100
         
-        # تصفية السترايكات القريبة والفوليوم العالي
-        lower_bound, upper_bound = price * 0.90, price * 1.10
+        # تصفية السترايكات القريبة من سعر السهم الحالي بنسبة ±5% فقط
+        lower_bound, upper_bound = price * 0.95, price * 1.05
         whales = df_all[(df_all['strike'] >= lower_bound) & (df_all['strike'] <= upper_bound)].copy()
-        whales = whales[(whales['Trade_Value'] >= whale_filter) & (whales['volume'] >= min_vol_filter)].copy()
+        whales = whales[whales['Trade_Value'] >= whale_filter].copy()
         
         if not whales.empty:
             df_display = pd.DataFrame({
                 'النوع': whales['Type'],
                 'السترايك': whales['strike'].apply(lambda x: f"${x:g}"),
-                'سعر العقد (Price)': whales['lastPrice'].apply(lambda x: f"${x:.2f}"),
-                'تاريخ العقد': selected_exp,
-                'عدد العقود (Volume)': whales['volume'].fillna(0).astype(int),
-                'سعر العرض (Ask)': whales['ask'].apply(lambda x: f"${x:.2f}"),
-                'سعر الطلب (Bid)': whales['bid'].apply(lambda x: f"${x:.2f}"),
-                'قيمة الصفقة الإجمالية': whales['Trade_Value'].apply(lambda x: f"${x/1000:.1f}K" if x < 1000000 else f"${x/1000000:.2f}M")
-            }).sort_values('عدد العقود (Volume)', ascending=False)
+                'سعر العقد الحالي': whales['lastPrice'].apply(lambda x: f"${x:.2f}"),
+                'العرض (Ask)': whales['ask'].apply(lambda x: f"${x:.2f}"),
+                'الطلب (Bid)': whales['bid'].apply(lambda x: f"${x:.2f}"),
+                'الحجم (Volume)': whales['volume'].fillna(0).astype(int),
+                'إجمالي قيمة الصفقة': whales['Trade_Value'].apply(lambda x: f"${x/1000:.1f}K" if x < 1000000 else f"${x/1000000:.2f}M")
+            }).sort_values('الحجم (Volume)', ascending=False)
 
-            st.dataframe(df_display, use_container_width=True, height=450)
+            st.dataframe(df_display, use_container_width=True, height=420)
         else:
-            st.info(f"لا توجد صفقات حيتان ملحوظة قريبة من السعر حالياً (${price:.2f}).")
+            st.info(f"لا توجد حركة حيتان مكثفة قريبة جداً من سعر السهم الحالي (${price:.2f}).")
 
     except Exception as e:
-        st.error(f"حدث خطأ أثناء تحميل البيانات: {e}")
+        st.error(f"حدث خطأ أثناء تحليل البيانات: {e}")
