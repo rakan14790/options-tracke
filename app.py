@@ -204,7 +204,7 @@ if ticker_symbol:
                         elif curr_p >= t1:
                             achievement = "🎯 الهدف 1 (+25%)"
                         elif curr_p < entry_price * 0.85:
-                            achievement = "🛑 وقف الخسارة"
+                            achievement = "🛑 ضرب وقف الخسارة"
                         else:
                             achievement = "⏳ قيد التداول"
                     else:
@@ -217,7 +217,7 @@ if ticker_symbol:
                     achievement = "🔄 جاري التحديث"
 
                 rows_data.append({
-                    "#": idx + 1,  # ترقيم تبسيطي يبدأ من 1
+                    "#": idx + 1,
                     "الوقت": row['Date'],
                     "الرمز والعقد": f"{t_ticker} ${t_strike:g} {t_type}",
                     "الانتهاء": t_exp,
@@ -232,10 +232,8 @@ if ticker_symbol:
             df_track = pd.DataFrame(rows_data)
             st.dataframe(df_track, use_container_width=True)
             
-            # قائمة اختيار بسيطة برقم الصفقة فقط (#1, #2...)
             remove_num = st.selectbox("اختر رقم الصفقة لإزالتها من القائمة:", options=df_track["#"].tolist())
             if st.button("💔 إزالة من المفضلة"):
-                # حذف السطر بناءً على الـ index الفعلي (رقم الصفقة - 1)
                 log_df = log_df.drop(remove_num - 1).reset_index(drop=True)
                 log_df.to_csv(LOG_FILE, index=False)
                 st.rerun()
@@ -244,8 +242,8 @@ if ticker_symbol:
 
         st.divider()
 
-        # 4. جدول تدفق صفقات الحيتان (مع اختصار الفوليوم مثل 52.3K)
-        st.subheader("🐋 رصد صفقات الحيتان (فوليوم مختصر وسعر العقد اللحظي)")
+        # 4. جدول تدفق صفقات الحيتان (بدون عرض وطلب + سترايكات مرتبة تنازلياً)
+        st.subheader("🐋 رصد صفقات الحيتان (مرتبة حسب السترايك)")
         selected_exp = st.selectbox("تاريخ عقد الحيتان:", options=expirations[:3])
         opt_data = stock.option_chain(selected_exp)
         
@@ -269,14 +267,18 @@ if ticker_symbol:
 
             df_display = pd.DataFrame({
                 'النوع': whales['Type'],
-                'السترايك': whales['strike'].apply(lambda x: f"${x:g}"),
+                'السترايك': whales['strike'],  # الاحتفاظ به كرقم من أجل الترتيب الصحيح
                 'تاريخ العقد': selected_exp,
-                'عدد العقود (Volume)': whales['volume'].apply(format_vol),  # الفوليوم المختصر
                 'سعر العقد الحالي': whales['lastPrice'].apply(lambda x: f"${x:.2f}"),
-                'العرض (Ask)': whales['ask'].apply(lambda x: f"${x:.2f}"),
-                'الطلب (Bid)': whales['bid'].apply(lambda x: f"${x:.2f}"),
+                'عدد العقود (Volume)': whales['volume'].apply(format_vol),
                 'إجمالي قيمة الصفقة': whales['Trade_Value'].apply(lambda x: f"${x/1000:.1f}K" if x < 1000000 else f"${x/1000000:.2f}M")
-            }).sort_values('سعر العقد الحالي', ascending=False)
+            })
+
+            # ترتيب السترايكات تنازلياً (من الأكبر إلى الأصغر: 235 ثم 232.5 ثم 230)
+            df_display = df_display.sort_values('السترايك', ascending=False)
+            
+            # تنسيق رمز السترايك بإضافة $ بعد الترتيب
+            df_display['السترايك'] = df_display['السترايك'].apply(lambda x: f"${x:g}")
 
             st.dataframe(df_display, use_container_width=True, height=420)
         else:
