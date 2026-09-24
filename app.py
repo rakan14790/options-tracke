@@ -3,171 +3,140 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 
-# إعدادات الصفحة - تصميم داكن مطابق لـ RasedSPX / Webull
-st.set_page_config(page_title="راصد الأسهم - Rased Stocks", layout="wide")
+# إعدادات الواجهة الاحترافية (Dark Dashboard Theme)
+st.set_page_config(page_title="منصة الراصد الذكي - Smart Order Flow", layout="wide")
 
 st.markdown("""
     <style>
     .stApp { background-color: #0b0e14; color: #e1e4e8; }
-    .metric-card {
+    .card-box {
         background-color: #161b22;
         border: 1px solid #30363d;
-        border-radius: 10px;
-        padding: 15px;
-        margin-bottom: 15px;
+        border-radius: 12px;
+        padding: 16px;
         text-align: center;
+        margin-bottom: 10px;
     }
-    .badge-green { color: #2ea043; font-weight: bold; }
-    .badge-red { color: #da3633; font-weight: bold; }
-    .badge-orange { color: #d29922; font-weight: bold; }
+    .buy-signal { color: #2ea043; font-weight: bold; font-size: 1.2em; }
+    .sell-signal { color: #da3633; font-weight: bold; font-size: 1.2em; }
+    .neutral-signal { color: #d29922; font-weight: bold; font-size: 1.2em; }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("⚡ راصد الشركات والصفقات الكبيرة")
+st.title("⚡ منصة الراصد الذكي للسيولة والصفقات الكبيرة")
 
-# القائمة الجانبية للإعدادات
-st.sidebar.header("⚙️ إعدادات الراصد")
-ticker_symbol = st.sidebar.text_input("رمز الشركة (Ticker)", value="NVDA").upper()
-min_trade_val = st.sidebar.number_input("حد الصفقات الكبيرة ($)", value=50000, step=10000)
+# القائمة الجانبية للتحكم
+st.sidebar.header("⚙️ إعدادات المحلل الذكي")
+ticker_symbol = st.sidebar.text_input("رمز الشركة", value="NVDA").upper()
+whale_filter = st.sidebar.slider("تصفية صفقات الحيتان (أكبر من $)", min_value=50000, max_value=1000000, value=150000, step=50000)
 
 if ticker_symbol:
     try:
         stock = yf.Ticker(ticker_symbol)
         info = stock.fast_info
         
-        current_price = info['lastPrice']
+        price = info['lastPrice']
         prev_close = info['previousClose']
-        change = current_price - prev_close
-        pct_change = (change / prev_close) * 100
+        change_pct = ((price - prev_close) / prev_close) * 100
         
-        # 1. لوحة تفاصيل السهم والاتجاهات
-        st.subheader(f"📌 {ticker_symbol} - ملخص الحركة والزخم")
+        # 1. كارت ملخص الاتجاه العام والتوصية اللحظية
+        st.subheader(f"📊 تحليل الاتجاه وعمق السيولة: {ticker_symbol}")
         
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            color = "🟢" if change >= 0 else "🔴"
-            st.markdown(f"""
-            <div class="metric-card">
-                <h4>السعر الحالي</h4>
-                <h2>${current_price:.2f}</h2>
-                <p>{color} {change:+.2f} ({pct_change:+.2f}%)</p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-        # خوارزمية تحديد الاتجاهات والزخم
         hist = stock.history(period="5d", interval="15m")
+        
         if not hist.empty:
-            sma_fast = hist['Close'].rolling(5).mean().iloc[-1]
-            sma_slow = hist['Close'].rolling(20).mean().iloc[-1]
-            rsi_val = 50  # افتراضي
-            
-            # الاتجاه العام واللحظي
-            if current_price > sma_fast and sma_fast > sma_slow:
-                trend_gen = "صاعد 🚀"
-                trend_inst = "صاعد 🟢"
-                flow_type = "دخول Calls 🟢"
-            elif current_price < sma_fast and sma_fast < sma_slow:
-                trend_gen = "هابط 🔻"
-                trend_inst = "هابط 🔴"
-                flow_type = "دخول Puts 🔴"
-            else:
-                trend_gen = "عرضي 🟡"
-                trend_inst = "متذبذب 🟡"
-                flow_type = "سيولة محايدة 🟡"
-
-            # الزخم
+            # حساب المتوسطات والزخم
+            sma20 = hist['Close'].rolling(20).mean().iloc[-1]
+            sma50 = hist['Close'].rolling(50).mean().iloc[-1]
             volume_momentum = hist['Volume'].iloc[-1] - hist['Volume'].mean()
-            momentum_str = f"+{int(abs(volume_momentum)):,}" if volume_momentum > 0 else f"-{int(abs(volume_momentum)):,}"
-        else:
-            trend_gen, trend_inst, flow_type, momentum_str = "غير متاح", "غير متاح", "غير متاح", "0"
+            
+            # تحديد الاتجاه والزخم
+            if price > sma20 and sma20 > sma50:
+                overall_trend = "صاعد قوي 🚀"
+                momentum_status = "زخم شرائي عالٍ 🟢"
+                action_recommendation = "<span class='buy-signal'>🟢 مناطق دخول شرائية (Calls)</span>"
+            elif price < sma20 and sma20 < sma50:
+                overall_trend = "هابط 🔻"
+                momentum_status = "زخم بيعي ضاغط 🔴"
+                action_recommendation = "<span class='sell-signal'>🔴 مناطق ضغط بيعي / شورت (Puts)</span>"
+            else:
+                overall_trend = "عرضي / مذبذب 🟡"
+                momentum_status = "زخم محايد ⚪"
+                action_recommendation = "<span class='neutral-signal'>🟡 انتظار اتجاه واضح</span>"
 
-        with col2:
-            st.markdown(f"""
-            <div class="metric-card">
-                <h4>زخم السوق</h4>
-                <h3>⚡ {momentum_str}</h3>
-            </div>
-            """, unsafe_allow_html=True)
-
-        with col3:
-            st.markdown(f"""
-            <div class="metric-card">
-                <h4>الاتجاه العام / اللحظي</h4>
-                <p>العام: <b>{trend_gen}</b></p>
-                <p>اللحظي: <b>{trend_inst}</b></p>
-            </div>
-            """, unsafe_allow_html=True)
-
-        with col4:
-            st.markdown(f"""
-            <div class="metric-card">
-                <h4>السيولة اللحظية</h4>
-                <h3>{flow_type}</h3>
-            </div>
-            """, unsafe_allow_html=True)
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.markdown(f"<div class='card-box'><h4>السعر الحالي</h4><h2>${price:.2f}</h2><p>{'🟢' if change_pct>=0 else '🔴'} {change_pct:+.2f}%</p></div>", unsafe_allow_html=True)
+            with col2:
+                st.markdown(f"<div class='card-box'><h4>الاتجاه العام</h4><h3>{overall_trend}</h3></div>", unsafe_allow_html=True)
+            with col3:
+                st.markdown(f"<div class='card-box'><h4>زخم السيولة</h4><h3>{momentum_status}</h3></div>", unsafe_allow_html=True)
+            with col4:
+                st.markdown(f"<div class='card-box'><h4>التوصية اللحظية</h4><h3>{action_recommendation}</h3></div>", unsafe_allow_html=True)
 
         st.divider()
 
-        # 2. جدول الصفقات الكبيرة والتحليلات اللحظية (Whale & Block Trades)
-        st.subheader("🐳 الصفقات الكبيرة اللحظية (Whale Trades Flow)")
+        # 2. رصد صفقات الحيتان وعمق السوق بدون OI
+        st.subheader("🐋 رصد صفقات الحيتان (Whale & Block Trades Flow)")
         
         expirations = stock.options
         if expirations:
-            selected_exp = st.selectbox("اختر تاريخ انتهاء العقود", options=expirations[:3])
+            selected_exp = st.selectbox("اختر تاريخ الانتهاء للعقود", options=expirations[:3])
             opt = stock.option_chain(selected_exp)
             
             calls = opt.calls.copy()
             puts = opt.puts.copy()
-            calls['Option_Type'] = 'Call'
-            puts['Option_Type'] = 'Put'
+            calls['Type'] = 'Call'
+            puts['Type'] = 'Put'
             
-            df_options = pd.concat([calls, puts])
-            df_options['Trade_Value'] = df_options['volume'] * df_options['lastPrice'] * 100
+            df_opt = pd.concat([calls, puts])
+            df_opt['Trade_Value'] = df_opt['volume'] * df_opt['lastPrice'] * 100
             
-            # تصفية الصفقات الكبيرة فقط بناءً على الحد الأدنى للقيمة
-            df_large = df_options[df_options['Trade_Value'] >= min_trade_val].copy()
+            # تصفية الصفقات الكبيرة فقط
+            whales = df_opt[df_opt['Trade_Value'] >= whale_filter].copy()
             
-            if not df_large.empty:
-                def classify_trade(row):
-                    val = row['Trade_Value']
-                    opt_type = row['Option_Type']
-                    last = row['lastPrice']
-                    ask = row['ask']
-                    bid = row['bid']
+            if not whales.empty:
+                def analyze_whale_trade(r):
+                    val = r['Trade_Value']
+                    opt_type = r['Type']
+                    last = r['lastPrice']
+                    ask = r['ask']
+                    bid = r['bid']
                     
-                    # تصنيف الجهة (مؤسسة vs فرد)
-                    entity = "🐋 مؤسسة" if val >= 200000 else "👤 فرد"
+                    # تصنيف نوع المنفذ
+                    entity = "🐋 مؤسسة ضخمة" if val >= 300000 else "🐳 حوت متوسط"
                     
-                    # تصنيف النوع والتوقع (شراء/بيع - لونق/شورت)
+                    # تحليل الاتجاه (شراء/بيع - لونق/شورت)
                     if ask > 0 and last >= ask:
-                        action = "شراء (Ask)"
-                        sentiment = "🚀 توقع صعود قوي" if opt_type == 'Call' else "🐻 توقع هبوط قوي"
+                        if opt_type == 'Call':
+                            return entity, "شراء Ask 🟢", "🚀 دخول صاعد (تجميع لونق)"
+                        else:
+                            return entity, "شراء Ask 🟢", "🐻 رهان هبوطي (شراء بوت)"
                     elif bid > 0 and last <= bid:
-                        action = "بيع/شورت (Bid)"
-                        sentiment = "🐻 فتح شورت / تفريغ" if opt_type == 'Call' else "🛡️ فتح شورت بيع / دعم"
+                        if opt_type == 'Call':
+                            return entity, "بيع Bid 🔴", "⚠️ تفريغ / فتح شورت كول"
+                        else:
+                            return entity, "بيع Bid 🔴", "🛡️ فتح شورت بوت (جدار دعم)"
                     else:
-                        action = "حياد"
-                        sentiment = "🟡 صفقة محايدة"
-                        
-                    return pd.Series([f"{entity} {action}", sentiment])
+                        return entity, "تنفيذ محايد 🟡", "⚪ صفقة موازنة"
 
-                df_large[['النوع والمنفذ', 'الوصف والتوقع']] = df_large.apply(classify_trade, axis=1)
+                whales[['Entity', 'Execution', 'Signal']] = whales.apply(analyze_whale_trade, axis=1, result_type='expand')
                 
-                # إعداد الجدول للعرض المطابق للراصد
-                df_display = pd.DataFrame({
-                    'النوع': df_large['Option_Type'].apply(lambda x: 'C (كول)' if x == 'Call' else 'P (بوت)'),
-                    'الإسترايك': df_large['strike'].apply(lambda x: f"${x:g}"),
-                    'عدد العقود': df_large['volume'].fillna(0).astype(int),
-                    'سعر التنفيذ': df_large['lastPrice'].apply(lambda x: f"${x:.2f}"),
-                    'قيمة الصفقة': df_large['Trade_Value'].apply(lambda x: f"${x/1000:.1f}K" if x < 1000000 else f"${x/1000000:.2f}M"),
-                    'المنفذ والاتجاه': df_large['النوع والمنفذ'],
-                    'الوصف والتوقع': df_large['الوصف والتوقع']
+                # تنظيم الجدول للعرض
+                df_show = pd.DataFrame({
+                    'النوع': whales['Type'].apply(lambda x: 'Call 🟢' if x == 'Call' else 'Put 🔴'),
+                    'السترايك': whales['strike'].apply(lambda x: f"${x:g}"),
+                    'عدد العقود': whales['volume'].fillna(0).astype(int),
+                    'سعر التنفيذ': whales['lastPrice'].apply(lambda x: f"${x:.2f}"),
+                    'قيمة الصفقة': whales['Trade_Value'].apply(lambda x: f"${x/1000:.1f}K" if x < 1000000 else f"${x/1000000:.2f}M"),
+                    'المنفذ': whales['Entity'],
+                    'طبيعة التنفيذ': whales['Execution'],
+                    'توقعات الحركة (Signal)': whales['Signal']
                 }).sort_values('قيمة الصفقة', ascending=False)
 
-                st.dataframe(df_display, use_container_width=True, height=500)
+                st.dataframe(df_show, use_container_width=True, height=520)
             else:
-                st.info(f"لا توجد صفقات كبيرة تتجاوز ${min_trade_val:,} لتاريخ الإغلاق المحدد حالياً.")
+                st.info(f"لا توجد صفقات حيتان تتجاوز ${whale_filter:,} حالياً لهذا التاريخ.")
 
     except Exception as e:
-        st.error(f"حدث خطأ أثناء جلب البيانات: {e}")
+        st.error(f"حدث خطأ أثناء الاتصال بالبيانات: {e}")
