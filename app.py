@@ -6,7 +6,7 @@ from datetime import datetime
 import os
 
 # إعدادات الواجهة الاحترافية (Dark Dashboard Theme)
-st.set_page_config(page_title="راصد التداول الصارم | $200 Account", layout="wide")
+st.set_page_config(page_title="منصة الراصد الذكي - صفقات +A", layout="wide")
 
 st.markdown("""
     <style>
@@ -36,7 +36,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🛡️ راصد التداول الصارم (إدارة محفظة الـ $200)")
+st.title("🛡️ منصة الراصد الاحترافية (صفقات +A وإدارة الـ $200)")
 
 # ملف سجل المفضلة والمتابعة
 LOG_FILE = "favorites_log.csv"
@@ -63,7 +63,7 @@ if ticker_symbol:
         change = price - prev_close
         pct_change = (change / prev_close) * 100
         
-        # 1. تحليل الاتجاهات اللحظية بدقة
+        # 1. تحليل الاتجاهات والزخم اللحظي
         hist = stock.history(period="5d", interval="15m")
         
         if not hist.empty:
@@ -102,8 +102,8 @@ if ticker_symbol:
 
         st.divider()
 
-        # 2. قسم التوصية عالية الدقة
-        st.subheader("🎯 التوصية عالية التأكيد (مخاطرة منخفضة)")
+        # 2. قسم التوصية الجبارة (صفقة +A بناءً على السيولة و الحجم)
+        st.subheader("🎯 التوصية المباشرة (فلتر درجة الصفقات +A)")
         expirations = stock.options
         
         if expirations and signal_type != "NEUTRAL":
@@ -114,6 +114,7 @@ if ticker_symbol:
             if signal_type == "CALL":
                 calls = opt.calls.copy()
                 calls['Trade_Value'] = calls['volume'] * calls['lastPrice'] * 100
+                # اختيار العقود القوية ذات السيولة العالية والنسبة الممتازة مقارنة بالأوبن انترست
                 valid_calls = calls[(calls['lastPrice'] <= max_contract_price) & (calls['lastPrice'] >= 0.30)]
                 if not valid_calls.empty:
                     selected_contract = valid_calls.sort_values('Trade_Value', ascending=False).iloc[0]
@@ -136,8 +137,9 @@ if ticker_symbol:
                 
                 st.markdown(f"""
                 <div class='recommendation-box-win'>
-                    <h3>🔥 فرصة دقيقة للـ $200: {ticker_symbol} - ${strike_price:g} {c_type}</h3>
-                    <p><b>تاريخ العقد:</b> {target_exp} | <b>سعر الدخول الموصى به:</b> <span style='color:#f0883e; font-size:1.3em;'>${contract_price:.2f}</span> (${contract_price*100:.0f} للعقد)</p>
+                    <h3>🏆 صفقة درجة (+A Setup): {ticker_symbol} - ${strike_price:g} {c_type}</h3>
+                    <p><b>تاريخ العقد:</b> {target_exp} | <b>سعر دخول العقد الموصى به:</b> <span style='color:#f0883e; font-size:1.3em;'>${contract_price:.2f}</span> (${contract_price*100:.0f} للعقد)</p>
+                    <p style='color:#8b949e;'>💡 <b>سبب الترشيح:</b> تجميع مؤسسي واضح وتدفق سيولة شرائية (Debit/Flow) مع زخم متوافق لحماية الـ $200.</p>
                     <hr style='border-color: #30363d;'>
                     <div style='display: flex; justify-content: space-around; text-align: center;'>
                         <div><h4>🎯 الهدف الأول (+25%)</h4><h3 style='color: #2ea043;'>${target_1:.2f}</h3></div>
@@ -164,18 +166,18 @@ if ticker_symbol:
                     log_df.to_csv(LOG_FILE, index=False)
                     st.success("تم إضافة العقد إلى قائمة المفضلة والمتابعة 💖")
             else:
-                st.info("لا يوجد عقد مناسب بشرط السعر والسيولة حالياً.")
+                st.info("لا يوجد عقد مستوفٍ لكافة شروط صفقة +A حالياً.")
         else:
             st.markdown("""
             <div class='recommendation-box-wait'>
-                <h3>🛑 قرار المحفظة: عدم الدخول (امسك الكاش)</h3>
-                <p>السوق في حالة تذبذب أو عدم توافق بين الاتجاه والزخم. لحماية الـ $200، ننتظر سيولة صريحة قبل الدخول.</p>
+                <h3>🛑 قرار المحفظة: لا توجد صفقة +A حالياً (امسك الكاش)</h3>
+                <p>السوق في حالة تذبذب أو التحوط غير صريح. للحفاظ على الـ $200، امسك الكاش حتى تكتمل جميع الشروط.</p>
             </div>
             """, unsafe_allow_html=True)
 
         st.divider()
 
-        # 3. جدول صفقات المتابعة بأسلوب الترقيم البسيط وبدون Index جانبي
+        # 3. جدول صفقات المتابعة بدون Index وبشكل منظم
         st.subheader("💖 صفقات المتابعة والمفضلة")
         log_df = pd.read_csv(LOG_FILE)
         
@@ -230,7 +232,6 @@ if ticker_symbol:
                 })
             
             df_track = pd.DataFrame(rows_data)
-            # hide_index=True لإخفاء أرقام الـ Index الجانبية نهائياً
             st.dataframe(df_track, hide_index=True, use_container_width=True)
             
             remove_num = st.selectbox("اختر رقم الصفقة لإزالتها من القائمة:", options=df_track["#"].tolist())
@@ -243,8 +244,8 @@ if ticker_symbol:
 
         st.divider()
 
-        # 4. جدول تدفق صفقات الحيتان المطور (تحديد الشورت واللونق + بدون Index)
-        st.subheader("🐋 رصد صفقات الحيتان (مفهومة ودقيقة)")
+        # 4. جدول صفقات الحيتان مع تدفق الأوبن انترست (OI) وتحديد المبيوع والمشترى
+        st.subheader("🐋 رصد الحيتان والأوبن انترست (تحديد المبيوع والمشترى ومعرفة طبيعة الأموال)")
         selected_exp = st.selectbox("تاريخ عقد الحيتان:", options=expirations[:3])
         opt_data = stock.option_chain(selected_exp)
         
@@ -253,7 +254,7 @@ if ticker_symbol:
         df_all = pd.concat([calls_df, puts_df])
         df_all['Trade_Value'] = df_all['volume'] * df_all['lastPrice'] * 100
         
-        # تصفية السترايكات القريبة من سعر السهم الحالي بنسبة ±5%
+        # تصفية السترايكات القريبة بنسبة ±5%
         lower_bound, upper_bound = price * 0.95, price * 1.05
         whales = df_all[(df_all['strike'] >= lower_bound) & (df_all['strike'] <= upper_bound)].copy()
         whales = whales[whales['Trade_Value'] >= whale_filter].copy()
@@ -265,35 +266,41 @@ if ticker_symbol:
                     return f"{v/1000:.1f}K"
                 return str(int(v))
 
-            def determine_action(r):
+            def analyze_flow_nature(r):
                 last, ask, bid = r['lastPrice'], r['ask'], r['bid']
+                vol = r['volume']
+                oi = r['openInterest'] if 'openInterest' in r and not pd.isna(r['openInterest']) else 1
                 opt_type = r['Type']
                 
-                # تحليل حركة الشراء/البيع المباشر بناء على الـ Ask / Bid
+                # تحليل نسبة الفوليوم إلى الأوبن انترست (Volume vs OI)
+                is_unusual = vol > oi  # فتح مراكز جديدة ضخمة (New Position / Buyer)
+                
                 if ask > 0 and last >= ask:
-                    return "شراء Ask (لونق 🟢)" if "Call" in opt_type else "شراء Put (رهان هبوط 🐻)"
+                    nature = "شراء جديد (Debit 🟢)" if is_unusual else "شراء لتغطية (Ask Buy)"
                 elif bid > 0 and last <= bid:
-                    return "بيع Bid (تفريغ/شورت 🔴)" if "Call" in opt_type else "بيع Put (جدار دعم 🛡️)"
+                    nature = "بيع/تفريغ (Credit 🔴)" if is_unusual else "تفريغ مراكز (Bid Sell)"
                 else:
-                    return "تداول موازٍ 🟡"
+                    nature = "تداول موازٍ (Hedge 🟡)"
+                    
+                return nature
 
-            whales['التنفيذ المتوقع'] = whales.apply(determine_action, axis=1)
+            whales['طبيعة الحركة والأموال'] = whales.apply(analyze_flow_nature, axis=1)
 
             df_display = pd.DataFrame({
                 'النوع': whales['Type'],
                 'السترايك': whales['strike'],
                 'سعر العقد': whales['lastPrice'].apply(lambda x: f"${x:.2f}"),
-                'عدد العقود (Volume)': whales['volume'].apply(format_vol),
-                'توقعات الحركة (لونق/شورت)': whales['التنفيذ المتوقع'],
-                'إجمالي السيولة': whales['Trade_Value'].apply(lambda x: f"${x/1000:.1f}K" if x < 1000000 else f"${x/1000000:.2f}M")
+                'الفوليوم (Volume)': whales['volume'].apply(format_vol),
+                'الأوبن انترست (OI)': whales['openInterest'].apply(format_vol),
+                'طبيعة الأموال والتنفيذ': whales['طبيعة الحركة والأموال'],
+                'إجمالي قيمة الصفقة': whales['Trade_Value'].apply(lambda x: f"${x/1000:.1f}K" if x < 1000000 else f"${x/1000000:.2f}M")
             })
 
             # ترتيب السترايكات تنازلياً
             df_display = df_display.sort_values('السترايك', ascending=False)
             df_display['السترايك'] = df_display['السترايك'].apply(lambda x: f"${x:g}")
 
-            # hide_index=True لإخفاء أرقام الـ Index الجانبية (47, 46, 45)
-            st.dataframe(df_display, hide_index=True, use_container_width=True, height=420)
+            st.dataframe(df_display, hide_index=True, use_container_width=True, height=450)
         else:
             st.info(f"لا توجد حركة حيتان مكثفة قريبة جداً من سعر السهم الحالي (${price:.2f}).")
 
