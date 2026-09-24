@@ -3,6 +3,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 from datetime import datetime
 import os
 
@@ -57,7 +58,7 @@ def format_gex_val(val):
     else:
         return f"{val:.0f}"
 
-# 2. القائمة الجانبية (تم إلغاء خيار اليومية والتثبيت على التحديد المباشر)
+# 2. القائمة الجانبية
 st.sidebar.header("🎯 إعدادات السهم والتاريخ")
 ticker_symbol = st.sidebar.text_input("رمز السهم", value="TSLA").upper()
 
@@ -118,7 +119,6 @@ if ticker_symbol:
             else:
                 call_wall, put_wall, gamma_flip = price, price, price
 
-            # بيانات عمق السيولة
             v_calls = c_df.groupby('strike')['volume'].sum().reset_index().rename(columns={'volume': 'Call_Vol'})
             v_puts = p_df.groupby('strike')['volume'].sum().reset_index().rename(columns={'volume': 'Put_Vol'})
             vol_merged = pd.merge(v_calls, v_puts, on='strike', how='outer').fillna(0)
@@ -146,7 +146,41 @@ if ticker_symbol:
 
         st.divider()
 
-        # 5. عرض شارت Net GEX
+        # 📈 5. شارت حركة السعر (الجديد)
+        st.subheader(f"📈 حركة السعر الفنية وتوافق مستويات القاما ({ticker_symbol})")
+        
+        hist = stock.history(period="3m", interval="1d")
+        if not hist.empty:
+            fig_stock = go.Figure()
+            
+            # إضافة الشموع اليابانية
+            fig_stock.add_trace(go.Candlestick(
+                x=hist.index,
+                open=hist['Open'],
+                high=hist['High'],
+                low=hist['Low'],
+                close=hist['Close'],
+                name="السعر"
+            ))
+            
+            # إضافة خطوط القاما على شارت السعر
+            fig_stock.add_hline(y=gamma_flip, line_dash="dash", line_color="#a371f7", annotation_text=f"Gamma Flip (${gamma_flip:.2f})")
+            fig_stock.add_hline(y=call_wall, line_dash="dot", line_color="#2ea043", annotation_text=f"Call Wall (${call_wall:g})")
+            fig_stock.add_hline(y=put_wall, line_dash="dot", line_color="#da3633", annotation_text=f"Put Wall (${put_wall:g})")
+
+            fig_stock.update_layout(
+                template="plotly_dark",
+                paper_bgcolor="#080a0f",
+                plot_bgcolor="#0e121b",
+                xaxis_rangeslider_visible=False,
+                margin=dict(l=20, r=20, t=30, b=20),
+                height=400
+            )
+            st.plotly_chart(fig_stock, use_container_width=True)
+
+        st.divider()
+
+        # 6. عرض شارت Net GEX
         st.subheader(f"📊 شارت القاما الصافية (Net GEX) - الانتهاء: [{target_expiration}]")
 
         if not gex_near.empty and gex_near['Net_GEX'].abs().sum() > 0:
@@ -182,7 +216,7 @@ if ticker_symbol:
 
         st.divider()
 
-        # 6. شارت عمق السيولة المبسط والمصمم بوضوح
+        # 7. شارت عمق السيولة
         st.subheader(f"📊 عمق السيولة وتوزيع الفوليوم ({ticker_symbol})")
         if not vol_near.empty:
             fig_vol, ax_v = plt.subplots(figsize=(10, 4.5))
@@ -207,7 +241,7 @@ if ticker_symbol:
 
         st.divider()
 
-        # 7. التوصية الفورية + سبب الاختيار
+        # 8. التوصية الفورية + سبب الاختيار
         st.subheader("🎯 التوصية الفورية")
         signal_type = "NEUTRAL"
         reason_text = ""
@@ -281,7 +315,7 @@ if ticker_symbol:
 
         st.divider()
 
-        # 8. جدول المتابعة
+        # 9. جدول المتابعة
         st.subheader("💖 صفقات المتابعة والمفضلة")
         log_df = pd.read_csv(LOG_FILE)
         
