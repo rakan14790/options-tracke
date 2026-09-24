@@ -36,7 +36,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🏛️ منصة التحليل المؤسسي المتكاملة | Volume Profile & Net GEX Engine")
+st.title("🏛️ منصة التحليل المؤسسي المتكاملة | Daily Volume Profile & Net GEX Engine")
 
 LOG_FILE = "favorites_log.csv"
 if not os.path.exists(LOG_FILE):
@@ -49,7 +49,7 @@ if not os.path.exists(LOG_FILE):
 # 2. القائمة الجانبية والإعدادات
 st.sidebar.header("🎯 إعدادات السهم والخيارات")
 ticker_symbol = st.sidebar.text_input("رمز السهم", value="NVDA").upper()
-timeframe = st.sidebar.selectbox("الفترة الزمنية للفوليوم بروفايل", ["1mo", "3mo", "6mo", "1y"], index=1)
+timeframe = st.sidebar.selectbox("النطاق الزمني للفوليوم بروفايل (يومي)", ["1mo", "3mo", "6mo", "1y"], index=0)
 max_contract_price = st.sidebar.number_input("الحد الأقصى لسعر العقد ($)", value=1.50, step=0.10)
 
 if ticker_symbol:
@@ -64,7 +64,7 @@ if ticker_symbol:
         
         expirations = stock.options
 
-        # 3. حساب مستويات القاما (GEX) والـ Gamma Flip
+        # 3. حساب مستويات القاما (GEX) والـ Gamma Flip (تحديث لحظي)
         call_wall = price
         put_wall = price
         gamma_flip = price
@@ -100,18 +100,18 @@ if ticker_symbol:
 
         st.divider()
 
-        # 5. القسم الأول: Volume Profile (بروفايل الحجم والسيولة)
-        st.subheader(f"📈 الفوليوم بروفايل ومستويات السيولة | Volume Profile ({ticker_symbol})")
+        # 5. الفوليوم بروفايل على الفريم اليومي (Daily Volume Profile)
+        st.subheader(f"📈 الفوليوم بروفايل اليومي ومستويات السيولة | Daily Volume Profile ({ticker_symbol})")
         
-        hist = stock.history(period=timeframe)
+        # سحب بيانات اليوم بخطوات يومية (interval='1d')
+        hist = stock.history(period=timeframe, interval="1d")
         if not hist.empty:
-            # تقسيم الأحجام على مستويات سعرية (Bins)
-            num_bins = 40
+            num_bins = 35
             price_bins = np.linspace(hist['Low'].min(), hist['High'].max(), num_bins)
             hist['Bin'] = pd.cut(hist['Close'], bins=price_bins)
             vol_profile = hist.groupby('Bin', observed=False)['Volume'].sum().reset_index()
             
-            # حساب POC (Point of Control)
+            # حساب POC (Point of Control) على الفريم اليومي
             poc_row = vol_profile.loc[vol_profile['Volume'].idxmax()]
             poc_price = (poc_row['Bin'].left + poc_row['Bin'].right) / 2
             
@@ -119,9 +119,9 @@ if ticker_symbol:
             fig_vp.patch.set_facecolor('#080a0f')
             ax_vp.set_facecolor('#0e121b')
 
-            # رسم الحركة السعرية
-            ax_vp.plot(hist.index, hist['Close'], color='#58a6ff', label='سعر السهم', linewidth=1.5)
-            ax_vp.axhline(poc_price, color='#f0883e', linestyle='--', linewidth=2, label=f'POC (أعلى سيولة): ${poc_price:.2f}')
+            # رسم الحركة السعرية اليومية
+            ax_vp.plot(hist.index, hist['Close'], color='#58a6ff', label='السعر اليومي (Daily Close)', linewidth=1.5)
+            ax_vp.axhline(poc_price, color='#f0883e', linestyle='--', linewidth=2, label=f'POC اليومي (أعلى سيولة): ${poc_price:.2f}')
             ax_vp.axhline(price, color='#38d430', linestyle=':', label=f'السعر الحالي: ${price:.2f}')
 
             ax_vp.set_ylabel('السعر ($)', color='#e1e4e8')
@@ -133,7 +133,7 @@ if ticker_symbol:
 
         st.divider()
 
-        # 6. القسم الثاني: Net GEX Chart (شارت القاما الصافية)
+        # 6. شارت Net GEX اللحظي
         st.subheader(f"📊 رسم Net GEX by Strike ({ticker_symbol}) - عقد: {expirations[0] if expirations else ''}")
 
         if expirations:
@@ -167,7 +167,7 @@ if ticker_symbol:
 
         st.divider()
 
-        # 7. القسم الثالث: التوصية الفورية (+A Setup)
+        # 7. التوصية الفورية والتنفيذ
         st.subheader("🎯 التوصية الفورية وتجهيز الصفقة")
         
         signal_type = "NEUTRAL"
@@ -201,7 +201,7 @@ if ticker_symbol:
                 <div class='recommendation-box'>
                     <h3>🏆 فرصة درجة (+A) على أسهم {ticker_symbol} - ${strike_price:g} {c_type}</h3>
                     <p><b>تاريخ الانتهاء:</b> {target_exp} | <b>سعر الدخول:</b> <span style='color:#f0883e; font-size:1.3em;'>${contract_price:.2f}</span> (${contract_price*100:.0f} للعقد)</p>
-                    <p style='color:#8b949e;'>💡 <b>السبب الفني:</b> السهم يتداول أعلى مستوى الـ Gamma Flip (${gamma_flip:.2f}) وفوق منطقة السيولة الرئيسية.</p>
+                    <p style='color:#8b949e;'>💡 <b>السبب الفني:</b> السهم يتداول أعلى مستوى الـ Gamma Flip (${gamma_flip:.2f}) ومستويات سيولة الفوليوم بروفايل اليومي.</p>
                     <hr style='border-color: #30363d;'>
                     <div style='display: flex; justify-content: space-around; text-align: center;'>
                         <div><h4>🎯 الهدف الأول (+25%)</h4><h3 style='color: #2ea043;'>${target_1:.2f}</h3></div>
@@ -237,7 +237,7 @@ if ticker_symbol:
 
         st.divider()
 
-        # 8. القسم الرابع: جدول المتابعة للصفقات
+        # 8. جدول الصفقات والمتابعة
         st.subheader("💖 صفقات المتابعة والمفضلة")
         log_df = pd.read_csv(LOG_FILE)
         
