@@ -151,79 +151,115 @@ if ticker_symbol:
         st.subheader(f"🖥️ شارت احترافي (نمط ATAS) - الفوليوم بروفايل ومستويات القاما ({ticker_symbol})")
         
         try:
-            # استخدام stock.history بدلاً من yf.download لضمان نجاح الجلب
-            hist = stock.history(period="3m", interval="1d")
+            # جلب البيانات التاريخية بشكل مباشر مع التضمين المضمون للأعمدة
+            hist = yf.download(ticker_symbol, period="3m", interval="1d", auto_adjust=True, progress=False)
             
-            if not hist.empty and len(hist) > 5:
-                # حساب الفوليوم بروفايل
-                price_min = hist['Low'].min()
-                price_max = hist['High'].max()
-                bins = np.linspace(price_min, price_max, 35)
-                vol_profile = np.zeros(len(bins)-1)
+            if hist.empty:
+                hist = yf.download(ticker_symbol, period="1m", interval="1d", auto_adjust=True, progress=False)
 
-                for _, row in hist.iterrows():
-                    idx = np.digitize((row['High'] + row['Low']) / 2, bins) - 1
-                    if 0 <= idx < len(vol_profile):
-                        vol_profile[idx] += row['Volume']
+            if not hist.empty:
+                # تسوية الأعمدة إذا كانت MultiIndex
+                if isinstance(hist.columns, pd.MultiIndex):
+                    hist.columns = [col[0] for col in hist.columns]
 
-                bin_centers = (bins[:-1] + bins[1:]) / 2
+                # التأكد من صحة الأعمدة المطلوبة
+                required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+                if all(col in hist.columns for col in required_cols):
+                    
+                    # 1. حساب الفوليوم بروفايل الجانبي (Volume Profile)
+                    price_min = float(hist['Low'].min())
+                    price_max = float(hist['High'].max())
+                    bins = np.linspace(price_min, price_max, 35)
+                    vol_profile = np.zeros(len(bins)-1)
 
-                # إنشاء شارت مكون من قسمين (يمين: الفوليوم بروفايل، يسار: الشموع)
-                fig_atas = make_subplots(
-                    rows=1, cols=2,
-                    column_widths=[0.82, 0.18],
-                    shared_yaxes=True,
-                    horizontal_spacing=0.01,
-                    specs=[[{"type": "candlestick"}, {"type": "bar"}]]
-                )
+                    for _, row in hist.iterrows():
+                        high_val = float(row['High'])
+                        low_val = float(row['Low'])
+                        vol_val = float(row['Volume'])
+                        
+                        # توزيع الفوليوم بين أعلى وأقل سعر لليوم
+                        idx = np.digitize((high_val + low_val) / 2, bins) - 1
+                        if 0 <= idx < len(vol_profile):
+                            vol_profile[idx] += vol_val
 
-                # رسم الشموع اليابانية
-                fig_atas.add_trace(go.Candlestick(
-                    x=hist.index,
-                    open=hist['Open'],
-                    high=hist['High'],
-                    low=hist['Low'],
-                    close=hist['Close'],
-                    name="السعر",
-                    increasing_line_color='#2ea043',
-                    decreasing_line_color='#da3633'
-                ), row=1, col=1)
+                    bin_centers = (bins[:-1] + bins[1:]) / 2
 
-                # رسم الفوليوم بروفايل الجانبي
-                fig_atas.add_trace(go.Bar(
-                    x=vol_profile,
-                    y=bin_centers,
-                    orientation='h',
-                    marker=dict(color='rgba(56, 139, 253, 0.4)', line=dict(color='#388bfd', width=1)),
-                    name="Volume Profile",
-                    showlegend=False
-                ), row=1, col=2)
+                    # 2. إنشاء Subplots بثلاثة أقسام: شموع + فوليوم سفلي + فوليوم بروفايل جانبي
+                    fig_atas = make_subplots(
+                        rows=2, cols=2,
+                        column_widths=[0.82, 0.18],
+                        row_heights=[0.8, 0.2],
+                        shared_yaxes=True,
+                        horizontal_spacing=0.01,
+                        vertical_spacing=0.02,
+                        specs=[[{"type": "candlestick"}, {"type": "bar"}],
+                               [{"type": "bar"}, None]]
+                    )
 
-                # إضافة خطوط مستويات القاما
-                fig_atas.add_hline(y=gamma_flip, line_dash="dash", line_color="#a371f7", line_width=2,
-                                  annotation_text=f"Gamma Flip (${gamma_flip:.2f})", annotation_position="top left", row=1, col=1)
-                fig_atas.add_hline(y=call_wall, line_dash="dot", line_color="#2ea043", line_width=2,
-                                  annotation_text=f"Call Wall (${call_wall:g})", annotation_position="top left", row=1, col=1)
-                fig_atas.add_hline(y=put_wall, line_dash="dot", line_color="#da3633", line_width=2,
-                                  annotation_text=f"Put Wall (${put_wall:g})", annotation_position="bottom left", row=1, col=1)
+                    # رسم الشموع اليابانية
+                    fig_atas.add_trace(go.Candlestick(
+                        x=hist.index,
+                        open=hist['Open'],
+                        high=hist['High'],
+                        low=hist['Low'],
+                        close=hist['Close'],
+                        name="السعر",
+                        increasing_line_color='#2ea043',
+                        decreasing_line_color='#da3633'
+                    ), row=1, col=1)
 
-                fig_atas.update_layout(
-                    template="plotly_dark",
-                    paper_bgcolor="#080a0f",
-                    plot_bgcolor="#0e121b",
-                    xaxis_rangeslider_visible=False,
-                    margin=dict(l=10, r=10, t=20, b=10),
-                    height=500,
-                    showlegend=False
-                )
-                
-                fig_atas.update_xaxes(gridcolor='#1b2230', row=1, col=1)
-                fig_atas.update_yaxes(gridcolor='#1b2230', row=1, col=1)
-                fig_atas.update_xaxes(visible=False, row=1, col=2)
+                    # رسم الفوليوم السفلي
+                    colors_vol = ['#2ea043' if float(c) >= float(o) else '#da3633' for c, o in zip(hist['Close'], hist['Open'])]
+                    fig_atas.add_trace(go.Bar(
+                        x=hist.index,
+                        y=hist['Volume'],
+                        marker_color=colors_vol,
+                        name="الحجم اليومي",
+                        showlegend=False
+                    ), row=2, col=1)
 
-                st.plotly_chart(fig_atas, use_container_width=True)
+                    # رسم الفوليوم بروفايل الجانبي (ATAS Style)
+                    fig_atas.add_trace(go.Bar(
+                        x=vol_profile,
+                        y=bin_centers,
+                        orientation='h',
+                        marker=dict(
+                            color='rgba(56, 139, 253, 0.45)',
+                            line=dict(color='#388bfd', width=1)
+                        ),
+                        name="Volume Profile",
+                        showlegend=False
+                    ), row=1, col=2)
+
+                    # رسم مستويات القاما على الشارت الرئيسي
+                    fig_atas.add_hline(y=gamma_flip, line_dash="dash", line_color="#a371f7", line_width=2,
+                                      annotation_text=f"Gamma Flip (${gamma_flip:.2f})", annotation_position="top left", row=1, col=1)
+                    fig_atas.add_hline(y=call_wall, line_dash="dot", line_color="#2ea043", line_width=2,
+                                      annotation_text=f"Call Wall (${call_wall:g})", annotation_position="top left", row=1, col=1)
+                    fig_atas.add_hline(y=put_wall, line_dash="dot", line_color="#da3633", line_width=2,
+                                      annotation_text=f"Put Wall (${put_wall:g})", annotation_position="bottom left", row=1, col=1)
+
+                    # إعدادات المظهر المظلم والاحترافي
+                    fig_atas.update_layout(
+                        template="plotly_dark",
+                        paper_bgcolor="#080a0f",
+                        plot_bgcolor="#0e121b",
+                        xaxis_rangeslider_visible=False,
+                        xaxis2_rangeslider_visible=False,
+                        margin=dict(l=10, r=10, t=20, b=10),
+                        height=530,
+                        showlegend=False
+                    )
+
+                    fig_atas.update_xaxes(gridcolor='#1b2230', row=1, col=1)
+                    fig_atas.update_yaxes(gridcolor='#1b2230', row=1, col=1)
+                    fig_atas.update_xaxes(visible=False, row=1, col=2)
+
+                    st.plotly_chart(fig_atas, use_container_width=True)
+                else:
+                    st.warning("⚠️ تعذر مطابقة هيكل بيانات السهم بشكل صحيح.")
             else:
-                st.warning("⚠️ لا توجد بيانات تاريخية كافية لعرض الشارت الفني.")
+                st.warning("⚠️ تعذر جلب البيانات التاريخية لهذا السهم حالياً من المصدر.")
         except Exception as chart_err:
             st.error(f"⚠️ خطأ أثناء بناء شارت السهم: {chart_err}")
 
