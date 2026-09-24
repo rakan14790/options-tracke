@@ -2,7 +2,6 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 from datetime import datetime
 import os
 
@@ -98,39 +97,24 @@ if ticker_symbol:
 
         st.divider()
 
-        # 3. رسم مخطط Net GEX العالي الوضوح باستخدام Matplotlib
-        st.subheader(f"📊 رسم Net GEX by Strike ({ticker_symbol}) - تاريخ العقد: {expirations[0] if expirations else ''}")
+        # 3. عرض شارت Net GEX باستخدام Streamlit Bar Chart (بدون مكتبات رسم خارجية)
+        st.subheader(f"📊 توزيع Net GEX بحسب السترايك ({ticker_symbol}) - عقد: {expirations[0] if expirations else ''}")
 
         if expirations:
             target_exp = expirations[0]
             opt = stock.option_chain(target_exp)
             c_df, p_df = opt.calls.copy(), opt.puts.copy()
 
-            c_df['GEX'] = c_df['volume'].fillna(0) * c_df['impliedVolatility'].fillna(0.2) * price * 0.01
-            p_df['GEX'] = -p_df['volume'].fillna(0) * p_df['impliedVolatility'].fillna(0.2) * price * 0.01
+            c_df['Call GEX'] = c_df['volume'].fillna(0) * c_df['impliedVolatility'].fillna(0.2) * price * 0.01
+            p_df['Put GEX'] = -p_df['volume'].fillna(0) * p_df['impliedVolatility'].fillna(0.2) * price * 0.01
 
             c_df = c_df[(c_df['strike'] >= price * 0.92) & (c_df['strike'] <= price * 1.08)]
             p_df = p_df[(p_df['strike'] >= price * 0.92) & (p_df['strike'] <= price * 1.08)]
 
-            fig, ax = plt.subplots(figsize=(10, 6))
-            fig.patch.set_facecolor('#080a0f')
-            ax.set_facecolor('#0e121b')
+            gex_df = pd.merge(c_df[['strike', 'Call GEX']], p_df[['strike', 'Put GEX']], on='strike', how='outer').fillna(0)
+            gex_df = gex_df.sort_values('strike').set_index('strike')
 
-            # رسم أعمدة Call GEX (أخضر) و Put GEX (أحمر)
-            ax.barh(c_df['strike'], c_df['GEX'], color='#2ea043', label='Call GEX 🟢', height=0.8)
-            ax.barh(p_df['strike'], p_df['GEX'], color='#da3633', label='Put GEX 🔴', height=0.8)
-
-            # رسم خطوط المستويات المحورية
-            ax.axhline(price, color='#38d430', linestyle='--', linewidth=2, label=f'Spot Price (${price:.2f})')
-            ax.axhline(gamma_flip, color='#a371f7', linestyle=':', linewidth=2, label=f'Flip Level (${gamma_flip:.2f})')
-
-            ax.set_ylabel('Strike Price ($)', color='#e1e4e8', fontsize=11)
-            ax.set_xlabel('Net GEX Magnitude', color='#e1e4e8', fontsize=11)
-            ax.tick_params(colors='#e1e4e8')
-            ax.grid(color='#1b2230', linestyle='--', alpha=0.5)
-            ax.legend(facecolor='#0e121b', edgecolor='#232a3b', labelcolor='#e1e4e8')
-
-            st.pyplot(fig)
+            st.bar_chart(gex_df, color=["#2ea043", "#da3633"])
 
         st.divider()
 
