@@ -2,11 +2,12 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 from datetime import datetime
 import os
 
-# إعدادات الواجهة الاحترافية (Dark Cyber Theme)
-st.set_page_config(page_title="NVDA Net GEX Dashboard", layout="wide")
+# 1. إعدادات الصفحة والستايل (Dark Cyber Theme)
+st.set_page_config(page_title="NVDA Institutional Trading Hub", layout="wide")
 
 st.markdown("""
     <style>
@@ -35,7 +36,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("⚡ منصة رصد القاما المباشر | Net GEX Engine")
+st.title("🏛️ منصة التحليل المؤسسي المتكاملة | Volume Profile & Net GEX Engine")
 
 LOG_FILE = "favorites_log.csv"
 if not os.path.exists(LOG_FILE):
@@ -45,8 +46,10 @@ if not os.path.exists(LOG_FILE):
     ])
     df_empty.to_csv(LOG_FILE, index=False)
 
-st.sidebar.header("🎯 إعدادات السهم والمحفظة")
+# 2. القائمة الجانبية والإعدادات
+st.sidebar.header("🎯 إعدادات السهم والخيارات")
 ticker_symbol = st.sidebar.text_input("رمز السهم", value="NVDA").upper()
+timeframe = st.sidebar.selectbox("الفترة الزمنية للفوليوم بروفايل", ["1mo", "3mo", "6mo", "1y"], index=1)
 max_contract_price = st.sidebar.number_input("الحد الأقصى لسعر العقد ($)", value=1.50, step=0.10)
 
 if ticker_symbol:
@@ -61,7 +64,7 @@ if ticker_symbol:
         
         expirations = stock.options
 
-        # 1. حساب مستويات القاما والـ Gamma Flip
+        # 3. حساب مستويات القاما (GEX) والـ Gamma Flip
         call_wall = price
         put_wall = price
         gamma_flip = price
@@ -84,7 +87,7 @@ if ticker_symbol:
 
             gamma_flip = (call_wall + put_wall) / 2
 
-        # 2. عرض كروت القياس
+        # 4. عرض بطاقات القياس الرئيسية
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.markdown(f"<div class='metric-card'><h4>السعر اللحظي (Spot Price)</h4><h2>${price:.2f}</h2><p>{'🟢' if change>=0 else '🔴'} {change:+.2f} ({pct_change:+.2f}%)</p></div>", unsafe_allow_html=True)
@@ -97,29 +100,75 @@ if ticker_symbol:
 
         st.divider()
 
-        # 3. عرض شارت Net GEX باستخدام Streamlit Bar Chart (بدون مكتبات رسم خارجية)
-        st.subheader(f"📊 توزيع Net GEX بحسب السترايك ({ticker_symbol}) - عقد: {expirations[0] if expirations else ''}")
+        # 5. القسم الأول: Volume Profile (بروفايل الحجم والسيولة)
+        st.subheader(f"📈 الفوليوم بروفايل ومستويات السيولة | Volume Profile ({ticker_symbol})")
+        
+        hist = stock.history(period=timeframe)
+        if not hist.empty:
+            # تقسيم الأحجام على مستويات سعرية (Bins)
+            num_bins = 40
+            price_bins = np.linspace(hist['Low'].min(), hist['High'].max(), num_bins)
+            hist['Bin'] = pd.cut(hist['Close'], bins=price_bins)
+            vol_profile = hist.groupby('Bin', observed=False)['Volume'].sum().reset_index()
+            
+            # حساب POC (Point of Control)
+            poc_row = vol_profile.loc[vol_profile['Volume'].idxmax()]
+            poc_price = (poc_row['Bin'].left + poc_row['Bin'].right) / 2
+            
+            fig_vp, ax_vp = plt.subplots(figsize=(10, 4))
+            fig_vp.patch.set_facecolor('#080a0f')
+            ax_vp.set_facecolor('#0e121b')
+
+            # رسم الحركة السعرية
+            ax_vp.plot(hist.index, hist['Close'], color='#58a6ff', label='سعر السهم', linewidth=1.5)
+            ax_vp.axhline(poc_price, color='#f0883e', linestyle='--', linewidth=2, label=f'POC (أعلى سيولة): ${poc_price:.2f}')
+            ax_vp.axhline(price, color='#38d430', linestyle=':', label=f'السعر الحالي: ${price:.2f}')
+
+            ax_vp.set_ylabel('السعر ($)', color='#e1e4e8')
+            ax_vp.tick_params(colors='#e1e4e8')
+            ax_vp.grid(color='#1b2230', linestyle='--', alpha=0.5)
+            ax_vp.legend(facecolor='#0e121b', edgecolor='#232a3b', labelcolor='#e1e4e8')
+
+            st.pyplot(fig_vp)
+
+        st.divider()
+
+        # 6. القسم الثاني: Net GEX Chart (شارت القاما الصافية)
+        st.subheader(f"📊 رسم Net GEX by Strike ({ticker_symbol}) - عقد: {expirations[0] if expirations else ''}")
 
         if expirations:
             target_exp = expirations[0]
             opt = stock.option_chain(target_exp)
             c_df, p_df = opt.calls.copy(), opt.puts.copy()
 
-            c_df['Call GEX'] = c_df['volume'].fillna(0) * c_df['impliedVolatility'].fillna(0.2) * price * 0.01
-            p_df['Put GEX'] = -p_df['volume'].fillna(0) * p_df['impliedVolatility'].fillna(0.2) * price * 0.01
+            c_df['GEX'] = c_df['volume'].fillna(0) * c_df['impliedVolatility'].fillna(0.2) * price * 0.01
+            p_df['GEX'] = -p_df['volume'].fillna(0) * p_df['impliedVolatility'].fillna(0.2) * price * 0.01
 
             c_df = c_df[(c_df['strike'] >= price * 0.92) & (c_df['strike'] <= price * 1.08)]
             p_df = p_df[(p_df['strike'] >= price * 0.92) & (p_df['strike'] <= price * 1.08)]
 
-            gex_df = pd.merge(c_df[['strike', 'Call GEX']], p_df[['strike', 'Put GEX']], on='strike', how='outer').fillna(0)
-            gex_df = gex_df.sort_values('strike').set_index('strike')
+            fig_gex, ax_gex = plt.subplots(figsize=(10, 5))
+            fig_gex.patch.set_facecolor('#080a0f')
+            ax_gex.set_facecolor('#0e121b')
 
-            st.bar_chart(gex_df, color=["#2ea043", "#da3633"])
+            ax_gex.barh(c_df['strike'], c_df['GEX'], color='#2ea043', label='Call GEX 🟢', height=0.8)
+            ax_gex.barh(p_df['strike'], p_df['GEX'], color='#da3633', label='Put GEX 🔴', height=0.8)
+
+            ax_gex.axhline(price, color='#38d430', linestyle='--', linewidth=2, label=f'Spot Price (${price:.2f})')
+            ax_gex.axhline(gamma_flip, color='#a371f7', linestyle=':', linewidth=2, label=f'Flip Level (${gamma_flip:.2f})')
+
+            ax_gex.set_ylabel('Strike Price ($)', color='#e1e4e8')
+            ax_gex.set_xlabel('Net GEX Magnitude', color='#e1e4e8')
+            ax_gex.tick_params(colors='#e1e4e8')
+            ax_gex.grid(color='#1b2230', linestyle='--', alpha=0.5)
+            ax_gex.legend(facecolor='#0e121b', edgecolor='#232a3b', labelcolor='#e1e4e8')
+
+            st.pyplot(fig_gex)
 
         st.divider()
 
-        # 4. التوصية الفورية (+A Setup)
-        st.subheader("🎯 التوصية الفورية")
+        # 7. القسم الثالث: التوصية الفورية (+A Setup)
+        st.subheader("🎯 التوصية الفورية وتجهيز الصفقة")
         
         signal_type = "NEUTRAL"
         if price > gamma_flip:
@@ -152,9 +201,7 @@ if ticker_symbol:
                 <div class='recommendation-box'>
                     <h3>🏆 فرصة درجة (+A) على أسهم {ticker_symbol} - ${strike_price:g} {c_type}</h3>
                     <p><b>تاريخ الانتهاء:</b> {target_exp} | <b>سعر الدخول:</b> <span style='color:#f0883e; font-size:1.3em;'>${contract_price:.2f}</span> (${contract_price*100:.0f} للعقد)</p>
-
-                    <p style='color:#8b949e;'>💡 <b>السبب:</b> السهم يتداول في نطاق إيجابي أعلى مستوى الـ Gamma Flip (${gamma_flip:.2f}).</p>
-
+                    <p style='color:#8b949e;'>💡 <b>السبب الفني:</b> السهم يتداول أعلى مستوى الـ Gamma Flip (${gamma_flip:.2f}) وفوق منطقة السيولة الرئيسية.</p>
                     <hr style='border-color: #30363d;'>
                     <div style='display: flex; justify-content: space-around; text-align: center;'>
                         <div><h4>🎯 الهدف الأول (+25%)</h4><h3 style='color: #2ea043;'>${target_1:.2f}</h3></div>
@@ -184,13 +231,13 @@ if ticker_symbol:
             st.markdown("""
             <div class='wait-box'>
                 <h3>🛑 قرار المحفظة: امسك الكاش (Wait & Protect Capital)</h3>
-                <p>لا يوجد اتجاه صريح حالياً. لحماية المحفظة، انتظر حسم الاتجاه حول Gamma Flip.</p>
+                <p>السهم في منطقة تذبذب محايدة. للحفاظ على رأس المال، يفضل الانتظار حتى حسم الاتجاه حول Gamma Flip.</p>
             </div>
             """, unsafe_allow_html=True)
 
         st.divider()
 
-        # 5. جدول المتابعة
+        # 8. القسم الرابع: جدول المتابعة للصفقات
         st.subheader("💖 صفقات المتابعة والمفضلة")
         log_df = pd.read_csv(LOG_FILE)
         
