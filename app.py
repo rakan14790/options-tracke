@@ -2,11 +2,10 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
 from datetime import datetime
 import os
 
-# إعدادات الشاشة والواجهة الاحترافية (Dark Pro Trading Theme)
+# إعدادات الواجهة الاحترافية (Dark Order Flow Theme)
 st.set_page_config(page_title="NVDA Institutional Order Flow Dashboard", layout="wide")
 
 st.markdown("""
@@ -18,13 +17,6 @@ st.markdown("""
         border-radius: 12px;
         padding: 16px;
         text-align: center;
-    }
-    .profile-card {
-        background: #0f131c;
-        border: 1px solid #1f2636;
-        border-radius: 14px;
-        padding: 20px;
-        margin-bottom: 20px;
     }
     .recommendation-box {
         background: linear-gradient(135deg, #0d2016 0%, #11291b 100%);
@@ -71,7 +63,7 @@ if ticker_symbol:
         
         expirations = stock.options
 
-        # 1. تحليل الفوليوم بروفايل والعمق (Volume Profile Engine)
+        # 1. تحليل الفوليوم بروفايل والعمق
         poc_price = price
         call_wall = price
         put_wall = price
@@ -83,17 +75,14 @@ if ticker_symbol:
             calls, puts = opt.calls.copy(), opt.puts.copy()
 
             if not calls.empty and not puts.empty:
-                # تصفية السترايكات القريبة من السعر (±7.5%)
                 c_near = calls[(calls['strike'] >= price * 0.925) & (calls['strike'] <= price * 1.075)]
                 p_near = puts[(puts['strike'] >= price * 0.925) & (puts['strike'] <= price * 1.075)]
 
                 total_call_vol = c_near['volume'].sum() if not c_near.empty else 1
                 total_put_vol = p_near['volume'].sum() if not p_near.empty else 1
                 
-                # نسبة عدم التوازن بين الشراء والبيع (Order Flow Imbalance)
                 imbalance_ratio = (total_call_vol / (total_call_vol + total_put_vol)) * 100
 
-                # تحديد أسطح القاما والـ POC
                 if not c_near.empty:
                     call_wall = c_near.sort_values('volume', ascending=False).iloc[0]['strike']
                 if not p_near.empty:
@@ -114,7 +103,7 @@ if ticker_symbol:
 
         st.divider()
 
-        # 3. الرسم البياني التفاعلي لعمق السيولة (Volume Profile & Footprint Heatmap)
+        # 3. عرض الفوليوم بروفايل المباشر (توزيع السيولة)
         st.subheader(f"📊 عمق السيولة والفوليوم بروفايل المباشر ({ticker_symbol})")
         
         if expirations:
@@ -125,42 +114,16 @@ if ticker_symbol:
             c_df = c_df[(c_df['strike'] >= price * 0.93) & (c_df['strike'] <= price * 1.07)]
             p_df = p_df[(p_df['strike'] >= price * 0.93) & (p_df['strike'] <= price * 1.07)]
 
-            fig = go.Figure()
-            
-            # سيولة الشراء (Call Buyers Volume)
-            fig.add_trace(go.Bar(
-                y=c_df['strike'],
-                x=c_df['volume'],
-                name='سيولة كول (Call Vol)',
-                orientation='h',
-                marker=dict(color='rgba(46, 160, 67, 0.85)')
-            ))
+            merged_prof = pd.merge(
+                c_df[['strike', 'volume']].rename(columns={'volume': 'سيولة الكول (Call Vol)'}),
+                p_df[['strike', 'volume']].rename(columns={'volume': 'سيولة البوت (Put Vol)'}),
+                on='strike', how='outer'
+            ).fillna(0).sort_values('strike', ascending=False)
 
-            # سيولة البيع (Put Sellers/Buyers Volume)
-            fig.add_trace(go.Bar(
-                y=p_df['strike'],
-                x=-p_df['volume'],
-                name='سيولة بوت (Put Vol)',
-                orientation='h',
-                marker=dict(color='rgba(218, 54, 51, 0.85)')
-            ))
+            merged_prof['السترايك'] = merged_prof['strike'].apply(lambda x: f"${x:g}")
+            merged_prof = merged_prof.set_index('السترايك')[['سيولة الكول (Call Vol)', 'سيولة البوت (Put Vol)']]
 
-            # خط السعر اللحظي
-            fig.add_hline(y=price, line_dash="dash", line_color="#f0883e", annotation_text=f"السعر اللحظي الحالي (${price:.2f})")
-
-            fig.update_layout(
-                barmode='relative',
-                title=dict(text=f"توزيع الفوليوم والسيولة على المستويات (تاريخ الانتهاء: {target_exp})", font=dict(color="#e1e4e8")),
-                paper_bgcolor='#080a0f',
-                plot_bgcolor='#0f131c',
-                xaxis=dict(title="حجم التداول اللحظي (Volume Flow)", gridcolor='#161b22', zerolinecolor='#30363d'),
-                yaxis=dict(title="مستويات السترايك ($)", gridcolor='#161b22', autorange="reversed"),
-                legend=dict(font=dict(color="#e1e4e8")),
-                height=450,
-                margin=dict(l=20, r=20, t=40, b=20)
-            )
-
-            st.plotly_chart(fig, use_container_width=True)
+            st.bar_chart(merged_prof, height=380)
 
         st.divider()
 
@@ -202,7 +165,7 @@ if ticker_symbol:
                 <div class='recommendation-box'>
                     <h3>🏆 فرصة درجة (+A) على أسهم {ticker_symbol} - ${strike_price:g} {c_type}</h3>
                     <p><b>تاريخ الانتهاء:</b> {target_exp} | <b>سعر الدخول:</b> <span style='color:#f0883e; font-size:1.3em;'>${contract_price:.2f}</span> (${contract_price*100:.0f} للعقد)</p>
-                    <p style='color:#8b949e;'>💡 <b>سبب الترشيح:</b> اختراق إيجابي لعمق السيولة مع تفوق فوليوم الـ {c_type} بنسبة {imbalance_ratio:.1f}%.</p>
+                    <p style='color:#8b949e;'>💡 <b>سبب الترشيح:</b> تفوق فوليوم الـ {c_type} بنسبة {imbalance_ratio:.1f}% مع توافق في عمق السيولة.</p>
                     <hr style='border-color: #30363d;'>
                     <div style='display: flex; justify-content: space-around; text-align: center;'>
                         <div><h4>🎯 الهدف الأول (+25%)</h4><h3 style='color: #2ea043;'>${target_1:.2f}</h3></div>
@@ -238,7 +201,7 @@ if ticker_symbol:
 
         st.divider()
 
-        # 5. جدول المتابعة المباشر (سهل وسريع الإزالة)
+        # 5. جدول المتابعة
         st.subheader("💖 صفقات المتابعة والمفضلة")
         log_df = pd.read_csv(LOG_FILE)
         
