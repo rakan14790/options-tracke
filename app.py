@@ -5,25 +5,26 @@ import numpy as np
 from datetime import datetime
 import os
 
-# 1. تهيئة الصفحة والستايل الفاخر
+# 1. تهيئة الصفحة والستايل المتجاوب مع الجوال
 st.set_page_config(page_title="Alpha Capital | Institutional Options Terminal", layout="wide", page_icon="💎")
 
 st.markdown("""
     <style>
-    .stApp { background-color: #06080c; color: #f0f6fc; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    .stApp { background-color: #06080c; color: #f0f6fc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
     
     .gold-header {
         background: linear-gradient(90deg, #d4af37, #f3e5ab, #aa771c);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         font-weight: 800;
+        font-size: 1.8rem;
     }
     
     .hero-card {
         background: linear-gradient(135deg, #0d1117 0%, #161b22 100%);
         border: 1px solid #30363d;
         border-radius: 16px;
-        padding: 20px;
+        padding: 16px;
         box-shadow: 0 8px 24px rgba(0,0,0,0.5);
     }
     
@@ -31,7 +32,7 @@ st.markdown("""
         background: linear-gradient(135deg, #062b16 0%, #0d4429 100%);
         border: 2px solid #2ea043;
         border-radius: 16px;
-        padding: 24px;
+        padding: 20px;
         box-shadow: 0 10px 30px rgba(46, 160, 67, 0.2);
     }
     
@@ -39,7 +40,7 @@ st.markdown("""
         background: linear-gradient(135deg, #3c0d12 0%, #67161d 100%);
         border: 2px solid #da3633;
         border-radius: 16px;
-        padding: 24px;
+        padding: 20px;
         box-shadow: 0 10px 30px rgba(218, 54, 51, 0.2);
     }
 
@@ -47,27 +48,53 @@ st.markdown("""
         background: linear-gradient(135deg, #271d0c 0%, #433013 100%);
         border: 2px solid #d29922;
         border-radius: 16px;
-        padding: 24px;
+        padding: 20px;
     }
 
     .stat-badge {
         background-color: #21262d;
         border-radius: 8px;
-        padding: 8px 14px;
-        font-size: 0.9em;
+        padding: 8px 12px;
+        font-size: 0.85em;
         border: 1px solid #30363d;
+        text-align: center;
+        flex: 1;
+        min-width: 90px;
+    }
+
+    /* تحسين التصميم للشاشات الصغيرة والجوالات */
+    @media (max-width: 768px) {
+        .gold-header { font-size: 1.3rem; }
+        .hero-flex { flex-direction: column !important; align-items: flex-start !important; gap: 12px; }
+        .badges-flex { width: 100%; justify-content: space-between; }
+        .grid-targets { grid-template-columns: repeat(2, 1fr) !important; }
     }
     </style>
 """, unsafe_allow_html=True)
 
-# 2. ملف حفظ وحساب المفضلة
+# 2. إدارة ملف السجل وتفادي KeyError تلقائياً
 LOG_FILE = "favorites_log.csv"
-if not os.path.exists(LOG_FILE):
-    df_empty = pd.DataFrame(columns=[
-        "Date", "Ticker", "Type", "Strike", "Expiration", 
-        "Entry_Price", "Target_1", "Target_2", "Target_3", "Stop_Loss", "Contracts"
-    ])
-    df_empty.to_csv(LOG_FILE, index=False)
+REQUIRED_COLUMNS = [
+    "Date", "Ticker", "Type", "Strike", "Expiration", 
+    "Entry_Price", "Target_1", "Target_2", "Target_3", "Stop_Loss", "Contracts"
+]
+
+def load_favorites():
+    if not os.path.exists(LOG_FILE):
+        df = pd.DataFrame(columns=REQUIRED_COLUMNS)
+        df.to_csv(LOG_FILE, index=False)
+        return df
+    try:
+        df = pd.read_csv(LOG_FILE)
+        # التحقق من وجود جميع الأعمدة المطلوبة
+        for col in REQUIRED_COLUMNS:
+            if col not in df.columns:
+                df[col] = np.nan
+        return df[REQUIRED_COLUMNS]
+    except Exception:
+        df = pd.DataFrame(columns=REQUIRED_COLUMNS)
+        df.to_csv(LOG_FILE, index=False)
+        return df
 
 # 3. الهيدر الرئيسي
 st.markdown("<h1 class='gold-header'>💎 ALPHA CAPITAL | المنصة الرقمية للتداول المؤسسي</h1>", unsafe_allow_html=True)
@@ -82,7 +109,7 @@ max_trade_budget = portfolio_size * (risk_per_trade_pct / 100.0)
 
 st.sidebar.divider()
 st.sidebar.markdown("### 🔍 تحديد السهم والمُهل")
-ticker_symbol = st.sidebar.text_input("رمز السهم (Ticker)", value="NVDA").upper()
+ticker_symbol = st.sidebar.text_input("رمز السهم (Ticker)", value="NVDA").strip().upper()
 
 if ticker_symbol:
     try:
@@ -140,20 +167,20 @@ if ticker_symbol:
             call_wall, put_wall, gamma_flip = price, price, price
             call_ratio_pct = 50.0
 
-        # 6. لوحة مؤشرات الأداء الحية
+        # 6. لوحة مؤشرات الأداء الحية (متجاوبة مع الجوال)
         st.markdown(f"""
         <div class='hero-card'>
-            <div style='display: flex; justify-content: space-between; align-items: center;'>
+            <div class='hero-flex' style='display: flex; justify-content: space-between; align-items: center;'>
                 <div>
-                    <h2 style='margin:0;'>{ticker_symbol} <span style='font-size:0.6em; color:#8b949e;'>السعر اللحظي</span></h2>
-                    <h1 style='margin:0; font-size: 2.8em; color:#ffffff;'>${price:.2f} 
-                        <span style='font-size:0.4em; color:{'#2ea043' if change>=0 else '#da3633'};'>({change:+.2f} / {pct_change:+.2f}%)</span>
+                    <h3 style='margin:0; font-size:1.4em;'>{ticker_symbol} <span style='font-size:0.6em; color:#8b949e;'>السعر اللحظي</span></h3>
+                    <h1 style='margin:0; font-size: 2.2em; color:#ffffff;'>${price:.2f} 
+                        <span style='font-size:0.5em; color:{'#2ea043' if change>=0 else '#da3633'};'>({change:+.2f} / {pct_change:+.2f}%)</span>
                     </h1>
                 </div>
-                <div style='display:flex; gap:15px;'>
-                    <div class='stat-badge'><b>Zero Gamma Flip:</b><br><span style='color:#a371f7; font-size:1.2em;'>${gamma_flip:.2f}</span></div>
-                    <div class='stat-badge'><b>Call Wall (المقاومة):</b><br><span style='color:#2ea043; font-size:1.2em;'>${call_wall:g}</span></div>
-                    <div class='stat-badge'><b>Put Wall (الدعم):</b><br><span style='color:#da3633; font-size:1.2em;'>${put_wall:g}</span></div>
+                <div class='badges-flex' style='display:flex; gap:8px;'>
+                    <div class='stat-badge'><b>Zero Gamma:</b><br><span style='color:#a371f7; font-weight:bold;'>${gamma_flip:.2f}</span></div>
+                    <div class='stat-badge'><b>Call Wall:</b><br><span style='color:#2ea043; font-weight:bold;'>${call_wall:g}</span></div>
+                    <div class='stat-badge'><b>Put Wall:</b><br><span style='color:#da3633; font-weight:bold;'>${put_wall:g}</span></div>
                 </div>
             </div>
         </div>
@@ -179,7 +206,6 @@ if ticker_symbol:
             chain = opt.calls if signal_type == "CALL" else opt.puts
             chain['Liquidity_Score'] = chain['volume'].fillna(0) * chain['openInterest'].fillna(0)
             
-            # فلترة العقود المتاحة حسب الحد الأقصى للسعر والميزانية
             valid = chain[(chain['lastPrice'] <= max_contract_price) & (chain['lastPrice'] >= 0.15)]
             
             if not valid.empty:
@@ -188,53 +214,51 @@ if ticker_symbol:
                 contract_price = selected_contract['lastPrice']
                 single_contract_cost = contract_price * 100
                 
-                # حساب حجم المركز المناسب للمحفظة
                 recommended_contracts = max(1, int(max_trade_budget // single_contract_cost))
                 total_position_cost = recommended_contracts * single_contract_cost
 
-                # الأهداف الذكية
-                target_1 = contract_price * 1.20   # هدف خاطف (+20%)
-                target_2 = contract_price * 1.45   # هدف أساسي (+45%)
-                target_3 = contract_price * 2.00   # هدف امتدادي (+100%)
-                stop_loss = contract_price * 0.82  # وقف خسارة قاطع (-18%)
+                target_1 = contract_price * 1.20   # (+20%)
+                target_2 = contract_price * 1.45   # (+45%)
+                target_3 = contract_price * 2.00   # (+100%)
+                stop_loss = contract_price * 0.82  # (-18%)
 
                 card_style = "trade-card-call" if signal_type == "CALL" else "trade-card-put"
                 badge_color = "#2ea043" if signal_type == "CALL" else "#da3633"
 
                 st.markdown(f"""
                 <div class='{card_style}'>
-                    <div style='display:flex; justify-content:space-between; align-items:center;'>
-                        <span style='background-color:{badge_color}; color:#fff; padding:6px 16px; border-radius:20px; font-weight:bold; font-size:1.1em;'>
-                            إشارة دخول قوية 🔥 {signal_type}
+                    <div style='display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;'>
+                        <span style='background-color:{badge_color}; color:#fff; padding:4px 12px; border-radius:20px; font-weight:bold; font-size:0.9em;'>
+                            إشارة دخول 🔥 {signal_type}
                         </span>
-                        <span style='color:#e1e4e8; font-size:1.1em;'>مؤشر ثقة الخوارزمية: <b style='color:#f0883e;'>{confidence_score}%</b></span>
+                        <span style='color:#e1e4e8; font-size:0.9em;'>نسبة الثقة: <b style='color:#f0883e;'>{confidence_score}%</b></span>
                     </div>
                     
-                    <h2 style='margin-top:15px; font-size:2.2em;'>{ticker_symbol} - Strike ${strike_price:g} {signal_type}</h2>
-                    <p style='font-size:1.1em;'>📅 <b>تاريخ الانتهاء:</b> {target_expiration} | <b>سعر العقد المفرد:</b> <span style='color:#f0883e; font-weight:bold; font-size:1.3em;'>${contract_price:.2f}</span></p>
+                    <h3 style='margin-top:12px; font-size:1.6em;'>{ticker_symbol} - Strike ${strike_price:g} {signal_type}</h3>
+                    <p style='font-size:0.95em;'>📅 <b>الانتهاء:</b> {target_expiration} | <b>سعر العقد:</b> <span style='color:#f0883e; font-weight:bold;'>${contract_price:.2f}</span></p>
 
-                    <div style='background-color:rgba(0,0,0,0.3); padding:15px; border-radius:12px; margin:15px 0;'>
-                        <h4 style='margin:0 0 10px 0; color:#58a6ff;'>🧮 حاسبة إدارة المخاطر وتوزيع المركز:</h4>
-                        <p style='margin:3px 0;'>• <b>عدد العقود الموصى بها:</b> <span style='color:#ffffff; font-size:1.2em; font-weight:bold;'>{recommended_contracts} عقود</span></p>
-                        <p style='margin:3px 0;'>• <b>إجمالي التكلفة للمحفظة:</b> <span style='color:#ffffff; font-weight:bold;'>${total_position_cost:.2f}</span> (تأخذ { (total_position_cost/portfolio_size)*100:.1f}% من رأس مالك)</p>
+                    <div style='background-color:rgba(0,0,0,0.3); padding:12px; border-radius:10px; margin:12px 0;'>
+                        <h5 style='margin:0 0 6px 0; color:#58a6ff;'>🧮 إدارة المركز:</h5>
+                        <p style='margin:2px 0; font-size:0.9em;'>• <b>عدد العقود:</b> <span style='color:#ffffff; font-weight:bold;'>{recommended_contracts} عقود</span></p>
+                        <p style='margin:2px 0; font-size:0.9em;'>• <b>التكلفة:</b> <span style='color:#ffffff; font-weight:bold;'>${total_position_cost:.2f}</span> ({ (total_position_cost/portfolio_size)*100:.1f}% من المحفظة)</p>
                     </div>
 
-                    <div style='display: grid; grid-template-columns: repeat(4, 1fr); gap:10px; text-align:center; margin-top:20px;'>
-                        <div style='background:rgba(255,255,255,0.05); padding:10px; border-radius:10px;'>
-                            <small style='color:#8b949e;'>🎯 هدف خاطف (+20%)</small>
-                            <h3 style='color:#2ea043; margin:5px 0;'>${target_1:.2f}</h3>
+                    <div class='grid-targets' style='display: grid; grid-template-columns: repeat(4, 1fr); gap:8px; text-align:center;'>
+                        <div style='background:rgba(255,255,255,0.05); padding:8px; border-radius:8px;'>
+                            <small style='color:#8b949e; font-size:0.75em;'>🎯 خاطف (+20%)</small>
+                            <h4 style='color:#2ea043; margin:2px 0;'>${target_1:.2f}</h4>
                         </div>
-                        <div style='background:rgba(255,255,255,0.05); padding:10px; border-radius:10px;'>
-                            <small style='color:#8b949e;'>🚀 هدف أساسي (+45%)</small>
-                            <h3 style='color:#388bfd; margin:5px 0;'>${target_2:.2f}</h3>
+                        <div style='background:rgba(255,255,255,0.05); padding:8px; border-radius:8px;'>
+                            <small style='color:#8b949e; font-size:0.75em;'>🚀 أساسي (+45%)</small>
+                            <h4 style='color:#388bfd; margin:2px 0;'>${target_2:.2f}</h4>
                         </div>
-                        <div style='background:rgba(255,255,255,0.05); padding:10px; border-radius:10px;'>
-                            <small style='color:#8b949e;'>💎 هدف امتدادي (+100%)</small>
-                            <h3 style='color:#a371f7; margin:5px 0;'>${target_3:.2f}</h3>
+                        <div style='background:rgba(255,255,255,0.05); padding:8px; border-radius:8px;'>
+                            <small style='color:#8b949e; font-size:0.75em;'>💎 امتدادي (+100%)</small>
+                            <h4 style='color:#a371f7; margin:2px 0;'>${target_3:.2f}</h4>
                         </div>
-                        <div style='background:rgba(255,255,255,0.05); padding:10px; border-radius:10px;'>
-                            <small style='color:#8b949e;'>🛑 وقف الخسارة (-18%)</small>
-                            <h3 style='color:#da3633; margin:5px 0;'>${stop_loss:.2f}</h3>
+                        <div style='background:rgba(255,255,255,0.05); padding:8px; border-radius:8px;'>
+                            <small style='color:#8b949e; font-size:0.75em;'>🛑 الوقف (-18%)</small>
+                            <h4 style='color:#da3633; margin:2px 0;'>${stop_loss:.2f}</h4>
                         </div>
                     </div>
                 </div>
@@ -242,8 +266,8 @@ if ticker_symbol:
 
                 st.markdown("<br>", unsafe_allow_html=True)
 
-                if st.button("💖 إضافة الصفقة إلى قائمة المتابعة والصفقات الحية", use_container_width=True):
-                    log_df = pd.read_csv(LOG_FILE)
+                if st.button("💖 إضافة الصفقة إلى قائمة المتابعة الحية", use_container_width=True):
+                    log_df = load_favorites()
                     new_row = {
                         "Date": datetime.now().strftime('%m-%d %H:%M'),
                         "Ticker": ticker_symbol,
@@ -260,13 +284,14 @@ if ticker_symbol:
                     log_df = pd.concat([log_df, pd.DataFrame([new_row])], ignore_index=True)
                     log_df.to_csv(LOG_FILE, index=False)
                     st.success("تم تثبيت الصفقة في القائمة المباشرة! 💖")
+                    st.rerun()
             else:
-                st.warning("⚠️ لا توجد عقود تطابق شروط السعر أو السيولة في التاريخ المعتمد حالياً.")
+                st.warning("⚠️ لا توجد عقود تطابق شروط السعر أو السيولة في التاريخ المحدد.")
         else:
             st.markdown("""
             <div class='wait-card'>
-                <h2 style='color:#d29922; margin:0;'>🛑 قرار الخوارزمية: الانتظار وتجميد التداول (Hold Cash)</h2>
-                <p style='font-size:1.1em; margin-top:10px;'>السعر حالياً يدور في منطقة تذبذب ضيقة بالقرب من Gamma Flip ولا توجد غلبة واضحة للشرائيين أو البائعين. لحماية رأس المال، نوصي بعدم الدخول الآن.</p>
+                <h3 style='color:#d29922; margin:0;'>🛑 قرار الخوارزمية: الانتظار وتجميد التداول (Hold Cash)</h3>
+                <p style='font-size:0.95em; margin-top:8px;'>السعر حالياً يدور في منطقة تذبذب ضيقة بالقرب من Gamma Flip ولا توجد غلبة واضحة للشرائيين أو البائعين. لحماية رأس المال، نوصي بعدم الدخول الآن.</p>
             </div>
             """, unsafe_allow_html=True)
 
@@ -274,18 +299,24 @@ if ticker_symbol:
 
         # 8. جدول الصفقات المفتوحة والمتابعة الحية
         st.markdown("### 📋 الصفقات المفتوحة والمتابعة الحية")
-        log_df = pd.read_csv(LOG_FILE)
+        log_df = load_favorites()
         
+        # تنظيف الصفوف الفارغة إن وجدت
+        log_df = log_df.dropna(subset=['Ticker', 'Entry_Price'])
+
         if not log_df.empty:
             rows_data = []
             for idx, row in log_df.iterrows():
-                t_ticker = row['Ticker']
+                t_ticker = str(row['Ticker'])
                 t_strike = float(row['Strike'])
-                t_type = row['Type']
-                t_exp = row['Expiration']
-                entry_p = float(row['Entry_Price'])
-                t1, t2, t3 = float(row['Target_1']), float(row['Target_2']), float(row['Target_3'])
-                num_c = row.get('Contracts', 1)
+                t_type = str(row['Type'])
+                t_exp = str(row['Expiration'])
+                entry_p = float(row['Entry_Price']) if pd.notnull(row['Entry_Price']) else 0.0
+                t1 = float(row['Target_1']) if pd.notnull(row['Target_1']) else 0.0
+                t2 = float(row['Target_2']) if pd.notnull(row['Target_2']) else 0.0
+                t3 = float(row['Target_3']) if pd.notnull(row['Target_3']) else 0.0
+                sl = float(row['Stop_Loss']) if pd.notnull(row['Stop_Loss']) else 0.0
+                num_c = float(row['Contracts']) if pd.notnull(row['Contracts']) else 1.0
                 
                 try:
                     s_ticker = yf.Ticker(t_ticker)
@@ -295,17 +326,17 @@ if ticker_symbol:
                     
                     if not matched.empty:
                         curr_p = float(matched['lastPrice'].values[0])
-                        roi = ((curr_p - entry_p) / entry_p) * 100
-                        pnl_usd = (curr_p - entry_p) * 100 * float(num_c)
+                        roi = ((curr_p - entry_p) / entry_p) * 100 if entry_p > 0 else 0.0
+                        pnl_usd = (curr_p - entry_p) * 100 * num_c
                         
                         if curr_p >= t3: status = "💎 تم تحضير +100%"
                         elif curr_p >= t2: status = "🚀 تحقق الهدف 2"
                         elif curr_p >= t1: status = "🎯 تحقق الهدف 1"
-                        elif curr_p <= float(row['Stop_Loss']): status = "🛑 ضرب وقف الخسارة"
+                        elif curr_p <= sl: status = "🛑 ضرب وقف الخسارة"
                         else: status = "⏳ قيد التداول"
                     else:
                         curr_p, roi, pnl_usd, status = entry_p, 0.0, 0.0, "⚪ انتهى العقد"
-                except:
+                except Exception:
                     curr_p, roi, pnl_usd, status = entry_p, 0.0, 0.0, "🔄 تحديث"
 
                 rows_data.append({
@@ -313,7 +344,7 @@ if ticker_symbol:
                     "التاريخ": row['Date'],
                     "الصفقة": f"{t_ticker} ${t_strike:g} {t_type}",
                     "الانتهاء": t_exp,
-                    "العقود": num_c,
+                    "العقود": int(num_c),
                     "سعر الدخول": f"${entry_p:.2f}",
                     "السعر اللحظي": f"${curr_p:.2f}" if isinstance(curr_p, float) else curr_p,
                     "العائد (%)": f"{roi:+.1f}%",
@@ -332,9 +363,10 @@ if ticker_symbol:
                 if st.button("🗑️ إغلاق وحذف الصفقة"):
                     log_df = log_df.drop(remove_num - 1).reset_index(drop=True)
                     log_df.to_csv(LOG_FILE, index=False)
+                    st.success("تم إغلاق الصفقة وحذفها.")
                     st.rerun()
         else:
             st.info("لا توجد صفقات مفتوحة حالياً في قائمة المتابعة.")
 
     except Exception as e:
-        st.error(f"حدث خطأ أثناء الاتصال بالخادم: {e}")
+        st.error(f"حدث خطأ أثناء تحميل البيانات: {e}")
