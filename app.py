@@ -2,18 +2,19 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import plotly.graph_objects as go
 from datetime import datetime
 import os
 
-# إعدادات الواجهة الاحترافية (Dark Order Flow Theme)
-st.set_page_config(page_title="NVDA Institutional Order Flow Dashboard", layout="wide")
+# إعدادات الواجهة الاحترافية (Dark Cyber Theme)
+st.set_page_config(page_title="NVDA Net GEX Dashboard", layout="wide")
 
 st.markdown("""
     <style>
     .stApp { background-color: #080a0f; color: #e1e4e8; }
     .metric-card {
-        background: linear-gradient(145deg, #10141d, #171c28);
-        border: 1px solid #262c3a;
+        background: linear-gradient(145deg, #0e121b, #151a26);
+        border: 1px solid #232a3b;
         border-radius: 12px;
         padding: 16px;
         text-align: center;
@@ -25,19 +26,11 @@ st.markdown("""
         padding: 22px;
         margin-bottom: 25px;
     }
-    .wait-box {
-        background: linear-gradient(135deg, #241a0e 0%, #2e2111 100%);
-        border: 2px solid #d29922;
-        border-radius: 14px;
-        padding: 22px;
-        margin-bottom: 25px;
-    }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("⚡ منصة تتبع عمق السيولة والتدفق المؤسسي | NVDA & Stocks Pro")
+st.title("⚡ منصة رصد القاما المباشر | Net GEX Engine (QuantWheel Style)")
 
-# ملف المتابعة والمفضلة
 LOG_FILE = "favorites_log.csv"
 if not os.path.exists(LOG_FILE):
     df_empty = pd.DataFrame(columns=[
@@ -46,8 +39,7 @@ if not os.path.exists(LOG_FILE):
     ])
     df_empty.to_csv(LOG_FILE, index=False)
 
-# الشريط الجانبي للتحكم
-st.sidebar.header("🎯 تخصيص المحفظة والشركة")
+st.sidebar.header("🎯 إعدادات السهم والمحفظة")
 ticker_symbol = st.sidebar.text_input("رمز السهم", value="NVDA").upper()
 max_contract_price = st.sidebar.number_input("الحد الأقصى لسعر العقد ($)", value=1.50, step=0.10)
 
@@ -63,82 +55,105 @@ if ticker_symbol:
         
         expirations = stock.options
 
-        # 1. تحليل الفوليوم بروفايل والعمق
-        poc_price = price
+        # 1. حساب معادلة القاما التقريبية (Net GEX Calculation)
         call_wall = price
         put_wall = price
-        imbalance_ratio = 50.0
+        gamma_flip = price
 
         if expirations:
             target_exp = expirations[0]
             opt = stock.option_chain(target_exp)
             calls, puts = opt.calls.copy(), opt.puts.copy()
 
-            if not calls.empty and not puts.empty:
-                c_near = calls[(calls['strike'] >= price * 0.925) & (calls['strike'] <= price * 1.075)]
-                p_near = puts[(puts['strike'] >= price * 0.925) & (puts['strike'] <= price * 1.075)]
+            # معادلة تقدير القاما التقريبية: GEX = Volume * ImpliedVolatility * Price * 0.01
+            calls['GEX'] = calls['volume'].fillna(0) * calls['impliedVolatility'].fillna(0.2) * price * 0.01
+            puts['GEX'] = -puts['volume'].fillna(0) * puts['impliedVolatility'].fillna(0.2) * price * 0.01
 
-                total_call_vol = c_near['volume'].sum() if not c_near.empty else 1
-                total_put_vol = p_near['volume'].sum() if not p_near.empty else 1
-                
-                imbalance_ratio = (total_call_vol / (total_call_vol + total_put_vol)) * 100
+            c_near = calls[(calls['strike'] >= price * 0.90) & (calls['strike'] <= price * 1.10)]
+            p_near = puts[(puts['strike'] >= price * 0.90) & (puts['strike'] <= price * 1.10)]
 
-                if not c_near.empty:
-                    call_wall = c_near.sort_values('volume', ascending=False).iloc[0]['strike']
-                if not p_near.empty:
-                    put_wall = p_near.sort_values('volume', ascending=False).iloc[0]['strike']
+            if not c_near.empty:
+                call_wall = c_near.sort_values('GEX', ascending=False).iloc[0]['strike']
+            if not p_near.empty:
+                put_wall = p_near.sort_values('GEX', ascending=True).iloc[0]['strike']
 
-                poc_price = call_wall if total_call_vol > total_put_vol else put_wall
+            # المستوى المحوري Gamma Flip
+            gamma_flip = (call_wall + put_wall) / 2
 
-        # 2. عرض كروت المؤشرات الحيوية
+        # 2. عرض بطاقات القياس الرقمية
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.markdown(f"<div class='metric-card'><h4>السعر اللحظي</h4><h2>${price:.2f}</h2><p>{'🟢' if change>=0 else '🔴'} {change:+.2f} ({pct_change:+.2f}%)</p></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='metric-card'><h4>السعر اللحظي (Spot Price)</h4><h2>${price:.2f}</h2><p>{'🟢' if change>=0 else '🔴'} {change:+.2f} ({pct_change:+.2f}%)</p></div>", unsafe_allow_html=True)
         with col2:
-            st.markdown(f"<div class='metric-card'><h4>مستوى التجميع (POC)</h4><h2 style='color:#58a6ff;'>${poc_price:g}</h2><p>أعلى نقطة تداول</p></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='metric-card'><h4>مستوى الفليب (Gamma Flip)</h4><h2 style='color:#a371f7;'>${gamma_flip:.2f}</h2><p>نقطة التحول الحرج</p></div>", unsafe_allow_html=True)
         with col3:
-            st.markdown(f"<div class='metric-card'><h4>جدار القاما (Call Wall)</h4><h2 style='color:#2ea043;'>${call_wall:g}</h2><p>هدف المقاومة/الجذب</p></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='metric-card'><h4>جدار الكول (Call Wall)</h4><h2 style='color:#2ea043;'>${call_wall:g}</h2><p>أعلى قاما إيجابية</p></div>", unsafe_allow_html=True)
         with col4:
-            st.markdown(f"<div class='metric-card'><h4>خلل التدفق (Call/Put Ratio)</h4><h2>{imbalance_ratio:.1f}%</h2><p>{'سيطر الشرائيين 🟢' if imbalance_ratio>50 else 'سيطر البائعيين 🔴'}</p></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='metric-card'><h4>جدار البوت (Put Wall)</h4><h2 style='color:#da3633;'>${put_wall:g}</h2><p>أعلى قاما سلبية</p></div>", unsafe_allow_html=True)
 
         st.divider()
 
-        # 3. عرض الفوليوم بروفايل المباشر (توزيع السيولة)
-        st.subheader(f"📊 عمق السيولة والفوليوم بروفايل المباشر ({ticker_symbol})")
-        
+        # 3. رسم مخطط Net GEX الاحترافي المحاكي للشارتات العالمية
+        st.subheader(f"📊 رسم Net GEX by Strike ({ticker_symbol}) - تاريخ العقد: {expirations[0] if expirations else ''}")
+
         if expirations:
             target_exp = expirations[0]
             opt = stock.option_chain(target_exp)
             c_df, p_df = opt.calls.copy(), opt.puts.copy()
-            
-            c_df = c_df[(c_df['strike'] >= price * 0.93) & (c_df['strike'] <= price * 1.07)]
-            p_df = p_df[(p_df['strike'] >= price * 0.93) & (p_df['strike'] <= price * 1.07)]
 
-            merged_prof = pd.merge(
-                c_df[['strike', 'volume']].rename(columns={'volume': 'سيولة الكول (Call Vol)'}),
-                p_df[['strike', 'volume']].rename(columns={'volume': 'سيولة البوت (Put Vol)'}),
-                on='strike', how='outer'
-            ).fillna(0).sort_values('strike', ascending=False)
+            c_df['GEX'] = c_df['volume'].fillna(0) * c_df['impliedVolatility'].fillna(0.2) * price * 0.01
+            p_df['GEX'] = -p_df['volume'].fillna(0) * p_df['impliedVolatility'].fillna(0.2) * price * 0.01
 
-            merged_prof['السترايك'] = merged_prof['strike'].apply(lambda x: f"${x:g}")
-            merged_prof = merged_prof.set_index('السترايك')[['سيولة الكول (Call Vol)', 'سيولة البوت (Put Vol)']]
+            c_df = c_df[(c_df['strike'] >= price * 0.92) & (c_df['strike'] <= price * 1.08)]
+            p_df = p_df[(p_df['strike'] >= price * 0.92) & (p_df['strike'] <= price * 1.08)]
 
-            st.bar_chart(merged_prof, height=380)
+            fig = go.Figure()
+
+            # اعمدة القاما الموجبة (Call GEX - الأخضر)
+            fig.add_trace(go.Bar(
+                y=c_df['strike'],
+                x=c_df['GEX'],
+                name='Call GEX (إيجابي 🟢)',
+                orientation='h',
+                marker=dict(color='#2ea043')
+            ))
+
+            # اعمدة القاما السالبة (Put GEX - الأحمر)
+            fig.add_trace(go.Bar(
+                y=p_df['strike'],
+                x=p_df['GEX'],
+                name='Put GEX (سلبي 🔴)',
+                orientation='h',
+                marker=dict(color='#da3633')
+            ))
+
+            # الخطوط الأفقية المستهدفة (Spot Price & Call/Put Walls & Flip)
+            fig.add_hline(y=price, line_dash="dash", line_color="#38d430", annotation_text=f"Spot Price: ${price:.2f}", annotation_position="top right")
+            fig.add_hline(y=gamma_flip, line_dash="dot", line_color="#a371f7", annotation_text=f"Flip Level: ${gamma_flip:.2f}", annotation_position="bottom right")
+
+            fig.update_layout(
+                barmode='relative',
+                paper_bgcolor='#080a0f',
+                plot_bgcolor='#0e121b',
+                xaxis=dict(title="Net GEX Magnitude (القاما الصافية)", gridcolor='#1b2230', zerolinecolor='#38445d'),
+                yaxis=dict(title="Strike Price ($)", gridcolor='#1b2230', autorange="reversed"),
+                legend=dict(font=dict(color="#e1e4e8")),
+                height=520,
+                margin=dict(l=20, r=20, t=30, b=20)
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
 
         st.divider()
 
-        # 4. التوصية الجاهزة وعالية التأكيد (+A Grade Setup)
-        st.subheader("🎯 التوصية الفورية (إشارة دخول مؤكدة للـ $200)")
+        # 4. التوصية عالية التأكيد (+A Setup)
+        st.subheader("🎯 التوصية الفورية")
         
-        hist = stock.history(period="5d", interval="15m")
         signal_type = "NEUTRAL"
-        
-        if not hist.empty:
-            sma20 = hist['Close'].rolling(20).mean().iloc[-1]
-            if price > sma20 and imbalance_ratio > 52:
-                signal_type = "CALL"
-            elif price < sma20 and imbalance_ratio < 48:
-                signal_type = "PUT"
+        if price > gamma_flip:
+            signal_type = "CALL"
+        elif price < gamma_flip:
+            signal_type = "PUT"
 
         if expirations and signal_type != "NEUTRAL":
             target_exp = expirations[0]
@@ -157,15 +172,15 @@ if ticker_symbol:
                 contract_price = selected_contract['lastPrice']
                 c_type = "CALL" if signal_type == "CALL" else "PUT"
                 
-                target_1 = contract_price * 1.25  # +25%
-                target_2 = contract_price * 1.50  # +50%
-                stop_loss = contract_price * 0.85 # -15%
+                target_1 = contract_price * 1.25
+                target_2 = contract_price * 1.50
+                stop_loss = contract_price * 0.85
                 
                 st.markdown(f"""
                 <div class='recommendation-box'>
                     <h3>🏆 فرصة درجة (+A) على أسهم {ticker_symbol} - ${strike_price:g} {c_type}</h3>
                     <p><b>تاريخ الانتهاء:</b> {target_exp} | <b>سعر الدخول:</b> <span style='color:#f0883e; font-size:1.3em;'>${contract_price:.2f}</span> (${contract_price*100:.0f} للعقد)</p>
-                    <p style='color:#8b949e;'>💡 <b>سبب الترشيح:</b> تفوق فوليوم الـ {c_type} بنسبة {imbalance_ratio:.1f}% مع توافق في عمق السيولة.</p>
+                    <p style='color:#8b949e;'>💡 <b>السبب:</b> السهم يتداول في نطاق إيجابي أعلى مستوى الـ Gamma Flip (${gamma_flip:.2f}).</p>
                     <hr style='border-color: #30363d;'>
                     <div style='display: flex; justify-content: space-around; text-align: center;'>
                         <div><h4>🎯 الهدف الأول (+25%)</h4><h3 style='color: #2ea043;'>${target_1:.2f}</h3></div>
@@ -191,13 +206,6 @@ if ticker_symbol:
                     log_df = pd.concat([log_df, pd.DataFrame([new_row])], ignore_index=True)
                     log_df.to_csv(LOG_FILE, index=False)
                     st.success("تم إضافة العقد بنجاح! 💖")
-        else:
-            st.markdown("""
-            <div class='wait-box'>
-                <h3>🛑 قرار المحفظة: امسك الكاش (Wait & Protect Capital)</h3>
-                <p>لا يوجد انحياز صريح في عمق التداول وحجم السيولة حالياً. لحماية محفظتك، انتظر وضوح اتجاه السوق.</p>
-            </div>
-            """, unsafe_allow_html=True)
 
         st.divider()
 
