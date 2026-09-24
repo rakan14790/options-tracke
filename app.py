@@ -48,6 +48,7 @@ st.sidebar.header("⚙️ إعدادات المحلل")
 ticker_symbol = st.sidebar.text_input("رمز الشركة (Ticker)", value="NVDA").upper()
 max_contract_price = st.sidebar.number_input("الحد الأقصى لسعر العقد ($)", value=2.00, step=0.10)
 whale_filter = st.sidebar.slider("حد صفقات الحيتان ($)", min_value=50000, max_value=1000000, value=150000, step=50000)
+min_vol_filter = st.sidebar.number_input("الحد الأدنى للفوليوم الملحوظ", value=500, step=100)
 
 if ticker_symbol:
     try:
@@ -111,9 +112,7 @@ if ticker_symbol:
             if signal_type == "CALL":
                 calls = opt.calls.copy()
                 calls['Trade_Value'] = calls['volume'] * calls['lastPrice'] * 100
-                # فلترة العقود بشرط السعر <= max_contract_price
                 valid_calls = calls[(calls['lastPrice'] <= max_contract_price) & (calls['lastPrice'] > 0)]
-                
                 if not valid_calls.empty:
                     selected_contract = valid_calls.sort_values('Trade_Value', ascending=False).iloc[0]
             
@@ -121,7 +120,6 @@ if ticker_symbol:
                 puts = opt.puts.copy()
                 puts['Trade_Value'] = puts['volume'] * puts['lastPrice'] * 100
                 valid_puts = puts[(puts['lastPrice'] <= max_contract_price) & (puts['lastPrice'] > 0)]
-                
                 if not valid_puts.empty:
                     selected_contract = valid_puts.sort_values('Trade_Value', ascending=False).iloc[0]
 
@@ -130,7 +128,6 @@ if ticker_symbol:
                 contract_price = selected_contract['lastPrice']
                 c_type = "CALL" if signal_type == "CALL" else "PUT"
                 
-                # حساب الأهداف تلقائياً (+20% / +50% / وقف الخسارة -20%)
                 target_1 = contract_price * 1.20
                 target_2 = contract_price * 1.50
                 stop_loss = contract_price * 0.80
@@ -172,12 +169,11 @@ if ticker_symbol:
 
         st.divider()
 
-        # 3. سجل متابعة أداء التوصيات وتحقيق الأهداف
-        st.subheader("📈 سجل متابعة أداء التوصيات وتتبع السعر بعد التوصية")
+        # 3. سجل متابعة أداء التوصيات وتتبع السعر مع إمكانية الحذف
+        st.subheader("📈 سجل متابعة أداء التوصيات وحذف المنتهي منها")
         log_df = pd.read_csv(LOG_FILE)
         
         if not log_df.empty:
-            tracked_results = []
             for idx, row in log_df.iterrows():
                 t_ticker = row['Ticker']
                 t_strike = float(row['Strike'])
@@ -214,25 +210,28 @@ if ticker_symbol:
                     roi = 0
                     achievement = "🔄 جاري التحديث"
 
-                tracked_results.append({
-                    "تاريخ التوصية": row['Date'],
-                    "الشركة والعقد": f"{t_ticker} ${t_strike:g} {t_type}",
-                    "سعر الدخول": f"${entry_price:.2f}",
-                    "الهدف 1": f"${t1:.2f}",
-                    "الهدف 2": f"${t2:.2f}",
-                    "سعر العقد الحالي": f"${curr_p:.2f}" if isinstance(curr_p, float) else curr_p,
-                    "نسبة التغير (ROI)": f"{roi:+.1f}%",
-                    "الحالة": achievement
-                })
-            st.dataframe(pd.DataFrame(tracked_results), use_container_width=True)
+                col_det, col_del = st.columns([5, 1])
+                with col_det:
+                    curr_p_str = f"${curr_p:.2f}" if isinstance(curr_p, float) else curr_p
+                    st.markdown(f"""
+                    <b>{row['Date']}</b> | <b>{t_ticker} ${t_strike:g} {t_type}</b> ({t_exp}) | 
+                    دخول: <b>${entry_price:.2f}</b> | الهدف 1: <b>${t1:.2f}</b> | الهدف 2: <b>${t2:.2f}</b> | 
+                    السعر الحالي: <b>{curr_p_str}</b> | ROI: <b>{roi:+.1f}%</b> | <b>{achievement}</b>
+                    """)
+                with col_del:
+                    if st.button("🗑️ حذف", key=f"del_{idx}"):
+                        log_df = log_df.drop(idx)
+                        log_df.to_csv(LOG_FILE, index=False)
+                        st.rerun()
+                st.divider()
         else:
             st.info("لا توجد توصيات محفوظة ومتبعة حالياً.")
 
         st.divider()
 
-        # 4. جدول تدفق صفقات الحيتان (Whale Trades Flow)
-        st.subheader("🐋 رصد صفقات الحيتان (Whale Trades Flow)")
-        selected_exp = st.selectbox("عرض كافة الصفقات الكبيرة حسب التاريخ:", options=expirations[:3])
+        # 4. جدول تدفق صفقات الحيتان (السترايكات القريبة والعقود الملحوظة ذات الفوليوم العالي فقط)
+        st.subheader("🐋 رصد صفقات الحيتان (السترايكات القريبة والفوليوم العالي فقط)")
+        selected_exp = st.selectbox("عرض صفقات الحيتان حسب التاريخ:", options=expirations[:3])
         opt_data = stock.option_chain(selected_exp)
         
         calls_df, puts_df = opt_data.calls.copy(), opt_data.puts.copy()
@@ -240,18 +239,26 @@ if ticker_symbol:
         df_all = pd.concat([calls_df, puts_df])
         df_all['Trade_Value'] = df_all['volume'] * df_all['lastPrice'] * 100
         
-        whales = df_all[df_all['Trade_Value'] >= whale_filter].copy()
+        # 1) تصفية السترايكات القريبة من السعر فقط (في حدود ±10% من سعر السهم اللحظي)
+        lower_bound = price * 0.90
+        upper_bound = price * 1.10
+        whales = df_all[(df_all['strike'] >= lower_bound) & (df_all['strike'] <= upper_bound)].copy()
+        
+        # 2) تصفية الصفقات الكبيرة والملحوظة ذات الفوليوم العالي
+        whales = whales[(whales['Trade_Value'] >= whale_filter) & (whales['volume'] >= min_vol_filter)].copy()
         
         if not whales.empty:
             def analyze_whale(r):
                 val = r['Trade_Value']
                 opt_type = r['Type']
+                vol = r['volume']
                 last, ask, bid = r['lastPrice'], r['ask'], r['bid']
-                entity = "🐋 مؤسسة ضخمة" if val >= 300000 else "🐳 حوت متوسط"
+                
+                entity = "🔥 🐋 صفقة ملحوظة (فوليوم ضخم)" if vol >= 1500 else "🐳 حوت متوسط"
                 
                 if ask > 0 and last >= ask:
                     action = "شراء Ask 🟢"
-                    sig = "🚀 دخول صاعد" if opt_type == 'Call' else "🐻 رهان هبوطي"
+                    sig = "🚀 دخول صاعد ملحوظ" if opt_type == 'Call' else "🐻 رهان هبوطي ملحوظ"
                 elif bid > 0 and last <= bid:
                     action = "بيع Bid 🔴"
                     sig = "⚠️ تفريغ / شورت" if opt_type == 'Call' else "🛡️ بيع بوت (دعم)"
@@ -265,16 +272,18 @@ if ticker_symbol:
             
             df_display = pd.DataFrame({
                 'النوع': whales['Type'].apply(lambda x: 'Call 🟢' if x == 'Call' else 'Put 🔴'),
-                'السترايك': whales['strike'].apply(lambda x: f"${x:g}"),
+                'السترايك (قريب من السعر)': whales['strike'].apply(lambda x: f"${x:g}"),
                 'تاريخ العقد': selected_exp,
-                'عدد العقود': whales['volume'].fillna(0).astype(int),
+                'عدد العقود (Volume)': whales['volume'].fillna(0).astype(int),
                 'سعر التنفيذ': whales['lastPrice'].apply(lambda x: f"${x:.2f}"),
                 'قيمة الصفقة': whales['Trade_Value'].apply(lambda x: f"${x/1000:.1f}K" if x < 1000000 else f"${x/1000000:.2f}M"),
-                'المنفذ': whales['Entity'],
+                'حالة الصفقة': whales['Entity'],
                 'توقعات الحركة': whales['Signal']
-            }).sort_values('قيمة الصفقة', ascending=False)
+            }).sort_values('عدد العقود (Volume)', ascending=False)
 
             st.dataframe(df_display, use_container_width=True, height=400)
+        else:
+            st.info(f"لا توجد صفقات حيتان ملحوظة بفوليوم عالي قريبة من السعر حالياً (${price:.2f}).")
 
     except Exception as e:
         st.error(f"حدث خطأ أثناء تحميل البيانات: {e}")
