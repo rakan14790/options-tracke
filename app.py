@@ -2,7 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
+import matplotlib.pyplot as plt
 from datetime import datetime
 import os
 
@@ -26,10 +26,17 @@ st.markdown("""
         padding: 22px;
         margin-bottom: 25px;
     }
+    .wait-box {
+        background: linear-gradient(135deg, #241a0e 0%, #2e2111 100%);
+        border: 2px solid #d29922;
+        border-radius: 14px;
+        padding: 22px;
+        margin-bottom: 25px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("⚡ منصة رصد القاما المباشر | Net GEX Engine (QuantWheel Style)")
+st.title("⚡ منصة رصد القاما المباشر | Net GEX Engine")
 
 LOG_FILE = "favorites_log.csv"
 if not os.path.exists(LOG_FILE):
@@ -55,7 +62,7 @@ if ticker_symbol:
         
         expirations = stock.options
 
-        # 1. حساب معادلة القاما التقريبية (Net GEX Calculation)
+        # 1. حساب مستويات القاما والـ Gamma Flip
         call_wall = price
         put_wall = price
         gamma_flip = price
@@ -65,7 +72,6 @@ if ticker_symbol:
             opt = stock.option_chain(target_exp)
             calls, puts = opt.calls.copy(), opt.puts.copy()
 
-            # معادلة تقدير القاما التقريبية: GEX = Volume * ImpliedVolatility * Price * 0.01
             calls['GEX'] = calls['volume'].fillna(0) * calls['impliedVolatility'].fillna(0.2) * price * 0.01
             puts['GEX'] = -puts['volume'].fillna(0) * puts['impliedVolatility'].fillna(0.2) * price * 0.01
 
@@ -77,10 +83,9 @@ if ticker_symbol:
             if not p_near.empty:
                 put_wall = p_near.sort_values('GEX', ascending=True).iloc[0]['strike']
 
-            # المستوى المحوري Gamma Flip
             gamma_flip = (call_wall + put_wall) / 2
 
-        # 2. عرض بطاقات القياس الرقمية
+        # 2. عرض كروت القياس
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.markdown(f"<div class='metric-card'><h4>السعر اللحظي (Spot Price)</h4><h2>${price:.2f}</h2><p>{'🟢' if change>=0 else '🔴'} {change:+.2f} ({pct_change:+.2f}%)</p></div>", unsafe_allow_html=True)
@@ -93,7 +98,7 @@ if ticker_symbol:
 
         st.divider()
 
-        # 3. رسم مخطط Net GEX الاحترافي المحاكي للشارتات العالمية
+        # 3. رسم مخطط Net GEX العالي الوضوح باستخدام Matplotlib
         st.subheader(f"📊 رسم Net GEX by Strike ({ticker_symbol}) - تاريخ العقد: {expirations[0] if expirations else ''}")
 
         if expirations:
@@ -107,46 +112,29 @@ if ticker_symbol:
             c_df = c_df[(c_df['strike'] >= price * 0.92) & (c_df['strike'] <= price * 1.08)]
             p_df = p_df[(p_df['strike'] >= price * 0.92) & (p_df['strike'] <= price * 1.08)]
 
-            fig = go.Figure()
+            fig, ax = plt.subplots(figsize=(10, 6))
+            fig.patch.set_facecolor('#080a0f')
+            ax.set_facecolor('#0e121b')
 
-            # اعمدة القاما الموجبة (Call GEX - الأخضر)
-            fig.add_trace(go.Bar(
-                y=c_df['strike'],
-                x=c_df['GEX'],
-                name='Call GEX (إيجابي 🟢)',
-                orientation='h',
-                marker=dict(color='#2ea043')
-            ))
+            # رسم أعمدة Call GEX (أخضر) و Put GEX (أحمر)
+            ax.barh(c_df['strike'], c_df['GEX'], color='#2ea043', label='Call GEX 🟢', height=0.8)
+            ax.barh(p_df['strike'], p_df['GEX'], color='#da3633', label='Put GEX 🔴', height=0.8)
 
-            # اعمدة القاما السالبة (Put GEX - الأحمر)
-            fig.add_trace(go.Bar(
-                y=p_df['strike'],
-                x=p_df['GEX'],
-                name='Put GEX (سلبي 🔴)',
-                orientation='h',
-                marker=dict(color='#da3633')
-            ))
+            # رسم خطوط المستويات المحورية
+            ax.axhline(price, color='#38d430', linestyle='--', linewidth=2, label=f'Spot Price (${price:.2f})')
+            ax.axhline(gamma_flip, color='#a371f7', linestyle=':', linewidth=2, label=f'Flip Level (${gamma_flip:.2f})')
 
-            # الخطوط الأفقية المستهدفة (Spot Price & Call/Put Walls & Flip)
-            fig.add_hline(y=price, line_dash="dash", line_color="#38d430", annotation_text=f"Spot Price: ${price:.2f}", annotation_position="top right")
-            fig.add_hline(y=gamma_flip, line_dash="dot", line_color="#a371f7", annotation_text=f"Flip Level: ${gamma_flip:.2f}", annotation_position="bottom right")
+            ax.set_ylabel('Strike Price ($)', color='#e1e4e8', fontsize=11)
+            ax.set_xlabel('Net GEX Magnitude', color='#e1e4e8', fontsize=11)
+            ax.tick_params(colors='#e1e4e8')
+            ax.grid(color='#1b2230', linestyle='--', alpha=0.5)
+            ax.legend(facecolor='#0e121b', edgecolor='#232a3b', labelcolor='#e1e4e8')
 
-            fig.update_layout(
-                barmode='relative',
-                paper_bgcolor='#080a0f',
-                plot_bgcolor='#0e121b',
-                xaxis=dict(title="Net GEX Magnitude (القاما الصافية)", gridcolor='#1b2230', zerolinecolor='#38445d'),
-                yaxis=dict(title="Strike Price ($)", gridcolor='#1b2230', autorange="reversed"),
-                legend=dict(font=dict(color="#e1e4e8")),
-                height=520,
-                margin=dict(l=20, r=20, t=30, b=20)
-            )
-
-            st.plotly_chart(fig, use_container_width=True)
+            st.pyplot(fig)
 
         st.divider()
 
-        # 4. التوصية عالية التأكيد (+A Setup)
+        # 4. التوصية الفورية (+A Setup)
         st.subheader("🎯 التوصية الفورية")
         
         signal_type = "NEUTRAL"
@@ -180,7 +168,9 @@ if ticker_symbol:
                 <div class='recommendation-box'>
                     <h3>🏆 فرصة درجة (+A) على أسهم {ticker_symbol} - ${strike_price:g} {c_type}</h3>
                     <p><b>تاريخ الانتهاء:</b> {target_exp} | <b>سعر الدخول:</b> <span style='color:#f0883e; font-size:1.3em;'>${contract_price:.2f}</span> (${contract_price*100:.0f} للعقد)</p>
+
                     <p style='color:#8b949e;'>💡 <b>السبب:</b> السهم يتداول في نطاق إيجابي أعلى مستوى الـ Gamma Flip (${gamma_flip:.2f}).</p>
+
                     <hr style='border-color: #30363d;'>
                     <div style='display: flex; justify-content: space-around; text-align: center;'>
                         <div><h4>🎯 الهدف الأول (+25%)</h4><h3 style='color: #2ea043;'>${target_1:.2f}</h3></div>
@@ -206,6 +196,13 @@ if ticker_symbol:
                     log_df = pd.concat([log_df, pd.DataFrame([new_row])], ignore_index=True)
                     log_df.to_csv(LOG_FILE, index=False)
                     st.success("تم إضافة العقد بنجاح! 💖")
+        else:
+            st.markdown("""
+            <div class='wait-box'>
+                <h3>🛑 قرار المحفظة: امسك الكاش (Wait & Protect Capital)</h3>
+                <p>لا يوجد اتجاه صريح حالياً. لحماية المحفظة، انتظر حسم الاتجاه حول Gamma Flip.</p>
+            </div>
+            """, unsafe_allow_html=True)
 
         st.divider()
 
